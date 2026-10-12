@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chess Review</title>
+<link rel="stylesheet" href="style.css">
+</head><body><main>
+<header>
+ <h1>♟ Chess Review <span class="mut" style="font-weight:400;font-size:13px">local · Stockfish</span></h1>
+ <nav id="nav">
+  <button data-tab="review" class="on">Review</button><button data-tab="import">Import</button>
+  <button data-tab="history">History</button><button data-tab="insights">Insights</button>
+ </nav>
+ <span style="flex:1"></span>
+ <label class="mut" style="font-size:13px">Me: <input id="me" size="14" placeholder="your username"></label>
+</header>
+<div class="row mut settings">
+ <label>Pieces <select id="pset"></select></label>
+ <label>Board size <input type="range" id="bsize" min="320" max="760" step="10"></label>
+</div>
+
+<section class="tab on" id="tab-review">
+ <textarea id="pgn" placeholder="Paste PGN here, or use the Import tab…"></textarea>
+ <div class="row"><button id="go">Analyze</button>
+  <label>Depth <select id="depth"><option>12</option><option selected>14</option><option>16</option><option>18</option></select></label>
+  <span id="err" class="err"></span><span id="opening" class="mut"></span></div>
+ <div id="bar"><div></div></div>
+ <div class="cols" id="review" style="display:none">
+  <div>
+   <div class="pl"><span id="ptop"></span><small id="rtop"></small></div>
+   <div class="bwrap"><div class="evalbar" id="evalbar"><div class="evalfill" id="evalfill"></div><div class="evaltxt" id="evaltxt"></div></div><div class="bw" id="board"></div></div>
+   <div class="pl"><span id="pbot"></span><small id="rbot"></small></div>
+   <div class="ctrl">
+    <button class="sec" id="first">⏮</button><button class="sec" id="prev">◀</button><button class="sec" id="next">▶</button><button class="sec" id="last">⏭</button>
+    <label><input type="checkbox" id="flip"> flip</label><label><input type="checkbox" id="arrow" checked> arrow</label>
+    <label><input type="checkbox" id="snd" checked> sound</label><span class="picks" id="themes"></span>
+   </div>
+   <div class="mut" style="font-size:12px;margin-top:8px"><kbd>←</kbd><kbd>→</kbd> step · <kbd>↑</kbd><kbd>↓</kbd> start/end · <kbd>F</kbd> flip · <kbd>A</kbd> arrow · <kbd>M</kbd> mute · <kbd>Esc</kbd> exit variation · drag any piece to try a move</div>
+  </div>
+  <div>
+   <div class="panel info" id="info"></div>
+   <div class="panel"><svg id="graph" viewBox="0 0 400 80" width="100%" style="cursor:pointer"></svg></div>
+   <div class="panel"><table id="sum"></table></div>
+   <div class="panel" id="moves"></div>
+   <div class="row"><button class="sec sm" id="expPgn">Export annotated PGN</button><button class="sec sm" id="expHtml">Share as HTML file</button><a class="mut" id="dlpgn" style="font-size:13px;cursor:pointer">download report JSON</a></div>
+  </div>
+ </div>
+</section>
+
+<section class="tab" id="tab-import">
+ <div class="panel">
+  <div class="row"><select id="site"><option value="chesscom">Chess.com</option><option value="lichess">Lichess</option></select>
+   <input id="impuser" placeholder="username"><button id="load">Load recent games</button><span id="imperr" class="err"></span></div>
+  <div class="mut" style="font-size:13px">Fetches your public games from the site's API (only the username is sent). Click Review to analyze one.</div>
+ </div>
+ <div class="panel list" id="gamelist"></div>
+</section>
+
+<section class="tab" id="tab-history"><div class="panel list" id="histlist"></div></section>
+
+<section class="tab" id="tab-insights">
+ <div class="panel"><div class="row"><span>Stats for <b id="insuser"></b></span><button id="insgo" class="sm">Refresh</button>
+  <span class="mut" style="font-size:13px">based on every game saved in History where one side matches your username</span></div></div>
+ <div id="insbody"></div>
+</section>
+
+</main>
+<script src="app.js"></script>
+</body></html>

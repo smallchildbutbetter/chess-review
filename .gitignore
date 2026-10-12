@@ -1,0 +1,6 @@
+.venv/
+engines/
+data/
+game_report.json
+__pycache__/
+node_modules/
