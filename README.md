@@ -4,7 +4,7 @@ A local, private Chess.com-style game review powered by Stockfish. Runs entirely
 
 ## Run it
 ```bash
-git clone <repo-url> chess-review && cd chess-review
+git clone https://github.com/smallchildbutbetter/chess-review chess-review && cd chess-review
 ./start.sh            # macOS/Linux. Windows: double-click start.bat
                       # first run installs Python deps + Stockfish, then opens http://localhost:3000
 ```
