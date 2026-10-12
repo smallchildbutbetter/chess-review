@@ -19,6 +19,10 @@ on Windows download Stockfish and place the exe at `engines\stockfish.exe` (`sta
 - **Import**: pull recent games from Chess.com or Lichess by username (only the username is sent).
 - **History**: every review is saved to `data/reviews/` and re-opens instantly.
 - **Insights**: set "Me" to your username; stats by phase, piece, position type and opening, plus weak spots.
+- **Engine lines**: live top-3 candidate lines beside the board, updating as you step or try moves; click one to play it out.
+- **Clock & time**: per-move time spent, clock graph, time-trouble errors (needs a PGN with clock times, e.g. Chess.com or Lichess imports).
+- **Game rating**: a rough estimated rating per player from average centipawn loss, shown next to accuracy.
+- **Tablebases (optional)**: run `./get_tablebases.sh` (~396 MB) for exact win/draw/loss in endings with 5 or fewer pieces.
 - **Display**: nine drawn piece sets plus text glyphs, board-size slider, dark theme.
 - **Export**: annotated PGN, or a single self-contained HTML file to share a review.
 

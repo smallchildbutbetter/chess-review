@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Local chess game review: PGN -> Stockfish -> game_report.json."""
-import argparse, io, json, math, os, queue, shutil, sqlite3, sys, threading
+import argparse, io, json, math, os, queue, re, shutil, sqlite3, sys, threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import chess
 import chess.engine
 import chess.pgn
+import chess.syzygy
 
 HERE = Path(__file__).resolve().parent
 MATE_CP = 1000  # mate scores are clamped to +/-10 pawns
@@ -46,6 +47,70 @@ def win_pct(cp_mover):
     """Win probability (0-100) for the side whose centipawns are given."""
     c = max(-MATE_CP, min(MATE_CP, cp_mover))
     return 50 + 50 * (2 / (1 + math.exp(-0.00368208 * c)) - 1)
+
+
+# ------------------------------------------------------------------ tablebases
+TB_CP = {2: 900, 1: 0, 0: 0, -1: 0, -2: -900}   # cursed wins / blessed losses are draws under the 50-move rule
+
+
+def open_tablebase():
+    """Syzygy WDL tables from $SYZYGY_PATH or ./tablebases (None if not installed)."""
+    d = Path(os.environ.get("SYZYGY_PATH") or HERE / "tablebases")
+    if not d.is_dir() or not any(d.glob("*.rtbw")):
+        return None
+    try:
+        return chess.syzygy.open_tablebase(str(d))
+    except Exception:
+        return None
+
+
+def tb_wdl(tb, board):
+    """WDL from the side to move's view (-2..2), or None when not in the tables."""
+    if tb is None or board.castling_rights or len(board.piece_map()) > tb.largest:
+        return None
+    try:
+        return max(-2, min(2, tb.get_wdl(board)))
+    except Exception:
+        return None
+
+
+def tb_label(cp_white):
+    return "W" if cp_white > 0 else "L" if cp_white < 0 else "D"
+
+
+def apply_tablebase(boards, infos, tb):
+    """Replace engine evals by exact tablebase results where available."""
+    for i, b in enumerate(boards):
+        if b.is_game_over() or tb_wdl(tb, b) is None:
+            continue
+        vals = {}
+        for m in b.legal_moves:
+            a = b.copy()
+            a.push(m)
+            if a.is_checkmate():
+                vals[m.uci()] = 2
+            elif a.is_game_over():
+                vals[m.uci()] = 0
+            else:
+                w = tb_wdl(tb, a)
+                if w is None:
+                    vals = None
+                    break
+                vals[m.uci()] = -w
+        if not vals:
+            continue
+        best_v = max(vals.values())
+        eng_best = infos[i][0]["pv"][0] if infos[i][0]["pv"] else None
+        best = eng_best if vals.get(eng_best) == best_v else next(u for u, v in vals.items() if v == best_v)
+        sign = 1 if b.turn == chess.WHITE else -1
+        pv = infos[i][0]["pv"] if best == eng_best else [best]
+        new = [{"cp": sign * TB_CP[best_v], "pv": pv, "tb": tb_label(sign * TB_CP[best_v])}]
+        lower = [v for v in vals.values() if TB_CP[v] != TB_CP[best_v]]
+        if lower:
+            u2 = next(u for u, v in vals.items() if v == max(lower))
+            new.append({"cp": sign * TB_CP[max(lower)], "pv": [u2]})
+        infos[i] = new
+    return infos
 
 
 # ---------------------------------------------------------------- opening book
@@ -196,7 +261,32 @@ def phase_of(board, move_number):
     return "endgame" if non_pawn_material(board) <= 26 else "middlegame"
 
 
-def build_rows(boards, moves, infos, book):
+def parse_tc(tc):
+    m = re.match(r"^(\d+)(?:\+(\d+))?$", tc or "")
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else (None, 0)
+
+
+def build_timing(game, moves):
+    """Per-move clock info from [%clk] comments: remaining, time spent, time-trouble flag."""
+    base, inc = parse_tc(game.headers.get("TimeControl", ""))
+    clocks = [n.clock() for n in game.mainline()]
+    if not any(c is not None for c in clocks):
+        return None
+    thresh = min(60, max(15, 0.1 * base)) if base else 30
+    prev, out = {True: base, False: base}, []
+    for i, c in enumerate(clocks):
+        color = (i % 2 == 0)
+        spent = None
+        if c is not None and prev[color] is not None:
+            spent = max(0.0, prev[color] + inc - c)
+        out.append({"clock": c, "time_spent": None if spent is None else round(spent, 1),
+                    "time_trouble": c is not None and c <= thresh})
+        if c is not None:
+            prev[color] = c
+    return {"moves": out, "base": base, "inc": inc, "trouble_at": thresh}
+
+
+def build_rows(boards, moves, infos, book, timing=None):
     rows, opening, prev_loss = [], None, 0.0
     for n, mv in enumerate(moves, 1):
         b, nb = boards[n - 1], boards[n]
@@ -205,8 +295,9 @@ def build_rows(boards, moves, infos, book):
         best_uci = cur[0]["pv"][0] if cur[0]["pv"] else None
         w_b = win_pct(pov(cur[0]["cp"], mover))
         w_a = win_pct(pov(nxt[0]["cp"], mover))
-        was_best = mv.uci() == best_uci
-        loss = 0.0 if was_best else max(0.0, w_b - w_a)
+        loss0 = max(0.0, w_b - w_a)
+        was_best = mv.uci() == best_uci or (bool(cur[0].get("tb")) and loss0 < 0.5)
+        loss = 0.0 if was_best else loss0
         gap = (w_b - win_pct(pov(cur[1]["cp"], mover))) if len(cur) > 1 else 0
         last = moves[n - 2] if n > 1 else None
         recapture = bool(last and boards[n - 2].is_capture(last) and mv.to_square == last.to_square)
@@ -240,10 +331,34 @@ def build_rows(boards, moves, infos, book):
             "win_before": round(w_b, 1), "win_after": round(w_a, 1), "loss": round(loss, 1),
             "classification": label,
             "accuracy": round(move_accuracy(loss, label), 1),
+            "tb": cur[0].get("tb"), "tb_after": nxt[0].get("tb"),
             "engine_best": pv_san[0] if pv_san else None, "engine_uci": best_uci, "engine_line": pv_san, "engine_line_uci": cur[0]["pv"],
         })
+        if timing:
+            t = timing["moves"][n - 1]
+            rows[-1].update(t)
         prev_loss = loss
     return rows, opening
+
+
+def est_rating(acpl):
+    """Rough strength estimate from average centipawn loss (heuristic, not Elo-calibrated)."""
+    return int(max(300, min(2900, round(3100 * math.exp(-0.01 * acpl) / 50) * 50)))
+
+
+def time_summary(mine):
+    ts = [r for r in mine if r.get("time_spent") is not None]
+    if not ts:
+        return None
+    err = lambda r: r["classification"] in ("Miss", "Mistake", "Blunder")
+    tr = [r for r in mine if r.get("time_trouble")]
+    ok = [r for r in mine if not r.get("time_trouble") and r.get("clock") is not None]
+    longest = max(ts, key=lambda r: r["time_spent"])
+    return {"avg": round(sum(r["time_spent"] for r in ts) / len(ts), 1),
+            "trouble_moves": len(tr), "errors_in_trouble": sum(map(err, tr)),
+            "normal_moves": len(ok), "errors_normal": sum(map(err, ok)),
+            "rushed_errors": sum(1 for r in ts if err(r) and r["time_spent"] <= 2),
+            "longest": {"ply": longest["ply"], "san": longest["san"], "secs": longest["time_spent"]}}
 
 
 def summarize(rows):
@@ -258,7 +373,10 @@ def summarize(rows):
             pm = [r for r in mine if r["phase"] == ph]
             phases[ph] = {"moves": len(pm), "accuracy": accuracy([r["accuracy"] for r in pm]),
                           "errors": sum(r["classification"] in ("Miss", "Mistake", "Blunder") for r in pm)}
-        out[color] = {"accuracy": accuracy([r["accuracy"] for r in mine]), "counts": counts, "phases": phases}
+        drops = [min(r["eval_drop"] * 100, 500) for r in mine if r["classification"] != "Book"]
+        acpl = round(sum(drops) / len(drops), 1) if drops else 0.0
+        out[color] = {"accuracy": accuracy([r["accuracy"] for r in mine]), "counts": counts, "phases": phases,
+                      "acpl": acpl, "rating": est_rating(acpl), "time": time_summary(mine)}
     return out
 
 
@@ -270,9 +388,14 @@ def analyze(game, depth, sf_path, progress):
         b.push(mv)
         boards.append(b)
     infos = analyse_all(boards, depth, sf_path, progress)
-    rows, opening = build_rows(boards, moves, infos, load_openings())
+    tb = open_tablebase()
+    if tb:
+        infos = apply_tablebase(boards, infos, tb)
+        tb.close()
+    timing = build_timing(game, moves)
+    rows, opening = build_rows(boards, moves, infos, load_openings(), timing)
     evals = [round(i[0]["cp"] / 100, 2) for i in infos]
-    return rows, evals, opening, boards[-1]
+    return rows, evals, opening, boards[-1], timing, bool(tb)
 
 
 def main():
@@ -286,10 +409,10 @@ def main():
         print(f"\r{done}/{total}", end="", file=sys.stderr, flush=True)
 
     game = load_game(a.pgn)
-    rows, evals, opening, final = analyze(game, a.depth, find_stockfish(), progress)
+    rows, evals, opening, final, timing, tb_on = analyze(game, a.depth, find_stockfish(), progress)
     print(file=sys.stderr)
     summary = summarize(rows)
-    report = {"version": 2, "final_fen": final.fen(), "final_legal": [m.uci() for m in final.legal_moves],
+    report = {"version": 3, "tablebase": tb_on, "clocks": timing and {"base": timing["base"], "inc": timing["inc"], "trouble_at": timing["trouble_at"]}, "final_fen": final.fen(), "final_legal": [m.uci() for m in final.legal_moves],
               "opening": opening, "headers": dict(game.headers), "depth": a.depth,
               "result": game.headers.get("Result", "*"), "eval_series_white_pov": evals,
               "summary": summary, "moves": rows}

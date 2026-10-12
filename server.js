@@ -14,7 +14,7 @@ const HOST = process.env.HOST || "127.0.0.1";
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, "public");
 const REVIEWS = path.join(ROOT, "data", "reviews");
-const VERSION = 2;
+const VERSION = 3;
 const PY = fs.existsSync(path.join(ROOT, ".venv")) ? path.join(ROOT, process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python") : "python3";
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 fs.mkdirSync(REVIEWS, { recursive: true });
@@ -108,7 +108,7 @@ async function getJson(url, headers) {
 async function importGames(site, user) {
   if (!/^[A-Za-z0-9_-]{2,30}$/.test(user)) throw new Error("invalid username");
   if (site === "lichess") {
-    const r = await getJson(`https://lichess.org/api/games/user/${user}?max=40&pgnInJson=true&opening=true&clocks=false&evals=false`, { Accept: "application/x-ndjson" });
+    const r = await getJson(`https://lichess.org/api/games/user/${user}?max=40&pgnInJson=true&opening=true&clocks=true&evals=false`, { Accept: "application/x-ndjson" });
     return (await r.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((g) => g.variant === "standard" && g.pgn).map((g) => ({
       white: g.players.white.user ? g.players.white.user.name : "Anonymous", black: g.players.black.user ? g.players.black.user.name : "Anonymous",
       whiteElo: g.players.white.rating, blackElo: g.players.black.rating,
@@ -141,7 +141,7 @@ function mine(r, user) {
 }
 function insights(user) {
   const reviews = allReviews().sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
-  const phases = {}, pieces = {}, bucket = { ahead: [0, 0], even: [0, 0], behind: [0, 0] }, openings = {}, classTotals = {}, trend = [];
+  const phases = {}, pieces = {}, bucket = { ahead: [0, 0], even: [0, 0], behind: [0, 0] }, tb = { trouble: [0, 0], normal: [0, 0] }, openings = {}, classTotals = {}, trend = [];
   let games = 0, W = 0, D = 0, L = 0, moves = 0, bad = 0;
   const bump = (o, k, f) => { o[k] = o[k] || { moves: 0, bad: 0, loss: 0 }; f(o[k]); };
   for (const r of reviews) {
@@ -161,6 +161,7 @@ function insights(user) {
       bump(pieces, /^[KQRBN]/.test(m.san) ? m.san[0] : /^O/.test(m.san) ? "K" : "P", (x) => { x.moves++; x.bad += isBad; x.loss += m.loss; });
       const b = m.win_before >= 65 ? "ahead" : m.win_before <= 35 ? "behind" : "even";
       bucket[b][0]++; bucket[b][1] += isBad;
+      if (m.clock != null) { const t = m.time_trouble ? tb.trouble : tb.normal; t[0]++; t[1] += isBad; }
     }
   }
   const rate = (x) => (x.moves ? +(100 * x.bad / x.moves).toFixed(1) : 0);
@@ -173,12 +174,15 @@ function insights(user) {
   const rb = (k) => (bucket[k][0] ? 100 * bucket[k][1] / bucket[k][0] : 0);
   if (bucket.ahead[0] >= 10 && rb("ahead") > rb("even")) tips.push(`You err more when ahead (${rb("ahead").toFixed(1)}%) than in equal positions (${rb("even").toFixed(1)}%): work on converting advantages.`);
   if (bucket.behind[0] >= 10 && rb("behind") > rb("even") * 1.3) tips.push(`When worse you err ${rb("behind").toFixed(1)}% of the time: practice defending.`);
+  const rt = (k) => (tb[k][0] ? 100 * tb[k][1] / tb[k][0] : 0);
+  if (tb.trouble[0] >= 10 && rt("trouble") > rt("normal") * 1.3) tips.push(`In time trouble you err ${rt("trouble").toFixed(1)}% of the time vs ${rt("normal").toFixed(1)}% otherwise: manage the clock earlier.`);
   const ops = Object.entries(openings).filter(([, v]) => v.games >= 2).sort((a, b) => (a[1].w - a[1].l) / a[1].games - (b[1].w - b[1].l) / b[1].games);
   if (ops.length && ops[0][1].l > ops[0][1].w) tips.push(`Struggling opening: ${ops[0][0]} (${ops[0][1].w}W-${ops[0][1].d}D-${ops[0][1].l}L).`);
   return { user, games, record: { W, D, L }, moves, errorRate: moves ? +(100 * bad / moves).toFixed(1) : 0,
     avgAccuracy: games ? +(trend.reduce((s, t) => s + (t.acc || 0), 0) / games).toFixed(1) : null, trend, phases: ph, pieces: pc,
     situation: Object.fromEntries(Object.entries(bucket).map(([k, v]) => [k, { moves: v[0], errors: v[1], errorRate: v[0] ? +(100 * v[1] / v[0]).toFixed(1) : 0 }])),
     openings: Object.entries(openings).map(([name, v]) => ({ name, games: v.games, w: v.w, d: v.d, l: v.l, avgAcc: +(v.acc / v.games).toFixed(1) })).sort((a, b) => b.games - a.games),
+    time: Object.fromEntries(Object.entries(tb).map(([k, x]) => [k, { moves: x[0], errors: x[1], errorRate: x[0] ? +(100 * x[1] / x[0]).toFixed(1) : 0 }])),
     classTotals, tips };
 }
 // ------------------------------------------------------------ routing
@@ -195,6 +199,7 @@ http.createServer(async (req, res) => {
       if (req.method === "DELETE") { fs.unlinkSync(reviewPath(hm[1])); return send(res, 200, { ok: true }); }
       return send(res, 200, loadReview(hm[1]));
     }
+    if (p === "/api/status") return send(res, 200, await workerCall({ cmd: "status" }));
     if (p === "/api/insights") {
       const u = url.searchParams.get("user") || ""; if (!u) return send(res, 400, { error: "username required" });
       return send(res, 200, insights(u));

@@ -203,6 +203,55 @@ async function analyze() {
   $("go").disabled = false; $("bar").style.display = "none";
 }
 
+const ORDER = ["Brilliant", "Great", "Best", "Excellent", "Good", "Book", "Inaccuracy", "Mistake", "Miss", "Blunder"];
+const TBTXT = { W: "White wins", D: "Draw", L: "Black wins" };
+const fmtClock = (s) => (s == null ? "–" : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`);
+function summaryCard() {
+  const s = R.summary, h = R.headers, nm = (n) => `<div class="nm" title="${esc(n)}">${esc(n)}</div>`;
+  let g = `<div class="sumcard"><div></div>${nm(h.White || "White")}<div></div>${nm(h.Black || "Black")}`;
+  g += `<div>Accuracy</div><div class="tile w">${s.white.accuracy}</div><div></div><div class="tile b">${s.black.accuracy}</div>`;
+  if (s.white.rating) g += `<div title="Rough estimate from average centipawn loss, not an official rating">Est. game rating</div><div class="tile w" style="font-size:15px">${s.white.rating}</div><div></div><div class="tile b" style="font-size:15px">${s.black.rating}</div>`;
+  g += "<hr>";
+  for (const k of ORDER.filter((k) => s.white.counts[k] || s.black.counts[k]))
+    g += `<div>${k}</div><div class="v" style="color:${CL[k][0]}">${s.white.counts[k]}</div><div class="ic" style="background:${CL[k][0]}">${CL[k][1]}</div><div class="v" style="color:${CL[k][0]}">${s.black.counts[k]}</div>`;
+  g += "<hr>";
+  for (const p of ["opening", "middlegame", "endgame"]) {
+    const a = (c) => (s[c].phases[p].accuracy == null ? "–" : s[c].phases[p].accuracy);
+    g += `<div class="mut">${p} accuracy</div><div class="v mut">${a("white")}</div><div></div><div class="v mut">${a("black")}</div>`;
+  }
+  return g + "</div>";
+}
+function timePanel() {
+  const ok = R.clocks && R.moves.some((m) => m.time_spent != null);
+  $("timepanel").style.display = ok ? "block" : "none";
+  if (!ok) return;
+  const n = R.moves.length, base = R.clocks.base || Math.max(...R.moves.map((m) => m.clock || 0)) || 1;
+  const x = (i) => (i + 0.5) / n * 400, cy = (c) => 52 - Math.min(1, c / base) * 46;
+  const line = (col) => R.moves.map((m, i) => (m.color === col && m.clock != null ? `${x(i)},${cy(m.clock)}` : null)).filter(Boolean).join(" ");
+  const maxT = Math.max(5, ...R.moves.map((m) => m.time_spent || 0)), bw = Math.max(1.5, 400 / n * 0.7);
+  let bars = "";
+  R.moves.forEach((m, i) => {
+    if (m.time_spent == null) return;
+    const hgt = Math.sqrt(m.time_spent / maxT) * 48, bad = BAD.includes(m.classification);
+    bars += `<rect x="${x(i) - bw / 2}" y="${118 - hgt}" width="${bw}" height="${Math.max(hgt, 0.8)}" fill="${bad ? CL[m.classification][0] : m.color === "white" ? "#ddd" : "#777"}"><title>${m.move_number}${m.color === "white" ? "." : "..."} ${m.san}: ${m.time_spent}s</title></rect>`;
+  });
+  const idx = X ? X.base : cur;
+  $("tgraph").innerHTML = `<rect width="400" height="120" style="fill:var(--bg)"/><line x1="0" x2="400" y1="${cy(R.clocks.trouble_at)}" y2="${cy(R.clocks.trouble_at)}" stroke="#ca3431" stroke-dasharray="3 3" opacity=".6"/>
+    <polyline fill="none" stroke="#eee" stroke-width="1.6" points="${line("white")}"/><polyline fill="none" stroke="#888" stroke-width="1.6" points="${line("black")}"/>${bars}
+    ${idx > 0 ? `<line x1="${x(idx - 1)}" x2="${x(idx - 1)}" y1="0" y2="120" stroke="#f6f669" stroke-width="2"/>` : ""}`;
+  const t = (c) => R.summary[c].time;
+  if (t("white") && t("black")) {
+    const er = (q) => `${q.errors}/${q.moves}`;
+    const row = (l, f) => `<tr><td>${l}</td><td>${f(t("white"))}</td><td>${f(t("black"))}</td></tr>`;
+    $("tsum").innerHTML = `<table><tr><th></th><th>White</th><th>Black</th></tr>` +
+      row("Avg time / move", (x) => x.avg + "s") + row("Longest think", (x) => `${esc(x.longest.san)} (${x.longest.secs}s)`) +
+      row("Moves in time trouble", (x) => x.trouble_moves) + row("Errors in time trouble", (x) => er({ errors: x.errors_in_trouble, moves: x.trouble_moves })) +
+      row("Errors otherwise", (x) => er({ errors: x.errors_normal, moves: x.normal_moves })) + row("Rushed errors (≤2s)", (x) => x.rushed_errors) + "</table>" +
+      '<div class="mut" style="font-size:12px;margin-top:4px">Lines: clock remaining (dashed = time-trouble line). Bars: time spent; coloured bars are Miss/Mistake/Blunder.</div>';
+  }
+}
+$("tgraph").onclick = (ev) => { const b = ev.currentTarget.getBoundingClientRect(); go(Math.round((ev.clientX - b.left) / b.width * R.moves.length)); };
+
 function showReport(rep) {
   R = rep; X = null; cur = 0; clearInterval(timer);
   showTab("review");
@@ -210,12 +259,8 @@ function showReport(rep) {
   $("opening").textContent = R.opening ? `📖 ${R.opening.eco} · ${R.opening.name}` : "";
   const h = R.headers, u = me().toLowerCase();
   $("flip").checked = !!u && (h.Black || "").toLowerCase() === u;
-  const ks = Object.keys(CL), s = R.summary;
-  const any = ks.filter((k) => s.white.counts[k] || s.black.counts[k]);
-  const ph = (c, p) => (s[c].phases[p].accuracy == null ? "–" : s[c].phases[p].accuracy + "%");
-  $("sum").innerHTML = `<tr><th></th><th>White</th><th>Black</th></tr><tr><td>Accuracy</td><td><b>${s.white.accuracy}%</b></td><td><b>${s.black.accuracy}%</b></td></tr>` +
-    any.map((k) => `<tr><td><span class="dotc" style="background:${CL[k][0]}"></span>${k}</td><td>${s.white.counts[k]}</td><td>${s.black.counts[k]}</td></tr>`).join("") +
-    ["opening", "middlegame", "endgame"].map((p) => `<tr class="mut"><td>${p} accuracy</td><td>${ph("white", p)}</td><td>${ph("black", p)}</td></tr>`).join("");
+  $("sum").innerHTML = summaryCard();
+  timePanel();
   let mh = "";
   R.moves.forEach((m, i) => {
     if (m.color === "white") mh += `<span class="n">${m.move_number}.</span>`;
@@ -237,7 +282,7 @@ function draw(animate) {
   } else if (X && P.best && $("arrow").checked) arrows.push({ from: P.best.slice(0, 2), to: P.best.slice(2, 4) });
   board.set({ fen: P.fen, flip: $("flip").checked, last: P.last, legal: P.legal, interactive: true, badge, arrows, sel: null, hint: null }, animate);
   evalbar(P.ev);
-  players(); info(); graph();
+  players(); info(); graph(); if (R.clocks) timePanel(); refreshLines();
   document.querySelectorAll("#moves .m").forEach((e) => e.classList.toggle("cur", !X && +e.dataset.i === cur));
   const c = document.querySelector("#moves .cur"); if (c) c.scrollIntoView({ block: "nearest" });
 }
@@ -265,20 +310,22 @@ function info() {
   if (X) {
     const sans = X.steps.slice(1, X.idx + 1).map((s) => s.san).join(" ");
     let h = `<div class="expbanner"><b>${X.line ? "Engine line" : "Variation"}</b> <span>${esc(sans) || "start"}</span><button class="sec sm" id="xexit">Back to game (Esc)</button>${X.line ? '<button class="sec sm" id="xplay">▶ Replay</button>' : ""}</div>`;
-    if (P.ev != null) h += `Eval <b>${fmtEval(P.ev)}</b>${P.over ? ` · game over ${esc(P.result || "")}` : ""}`;
+    if (P.tb) h += `<span class="tag" style="background:#8d6fd1;color:#fff">Tablebase: ${TBTXT[P.tb]}</span>`;
+    else if (P.ev != null) h += `Eval <b>${fmtEval(P.ev)}</b>${P.over ? ` · game over ${esc(P.result || "")}` : ""}`;
     else h += '<span class="mut">engine thinking…</span>';
     if (P.pv && P.pv.length) h += `<br><span class="mut">Engine: ${esc(P.pv.join(" "))}</span>`;
     box.innerHTML = h;
-    $("xexit").onclick = exitX; if ($("xplay")) $("xplay").onclick = () => playLine(X.row);
+    $("xexit").onclick = exitX; if ($("xplay")) $("xplay").onclick = () => playLine(X.src);
     return;
   }
   const m = P.row;
   if (!m) { box.innerHTML = `<b class="big">${esc(R.headers.White || "White")} vs ${esc(R.headers.Black || "Black")}</b><br><span class="mut">${esc(R.result)} · depth ${R.depth}</span>`; return; }
-  let h = `<b class="big">${m.move_number}${m.color === "white" ? "." : "..."} ${esc(m.san)}</b> ${tag(m.classification)}<br>Eval ${fmtEval(m.eval_after)} · win chance lost ${m.loss}%`;
+  let h = `<b class="big">${m.move_number}${m.color === "white" ? "." : "..."} ${esc(m.san)}</b> ${tag(m.classification)}<br>${m.tb_after ? `<span class="tag" style="background:#8d6fd1;color:#fff">Tablebase: ${TBTXT[m.tb_after]}</span>` : `Eval ${fmtEval(m.eval_after)}`} · win chance lost ${m.loss}%` +
+    (m.time_spent != null ? `<br><span class="mut">⏱ ${m.time_spent}s · ${fmtClock(m.clock)} left${m.time_trouble ? " · time trouble" : ""}</span>` : "");
   if (!["Best", "Brilliant", "Great", "Book", "Excellent"].includes(m.classification) && m.engine_best)
     h += `<br>Engine preferred <b>${esc(m.engine_best)}</b>: <span class="line" id="engline">${esc(m.engine_line.slice(1, 5).join(" ")) || "▶ play"} ▶</span>`;
   box.innerHTML = h;
-  if ($("engline")) $("engline").onclick = () => playLine(m);
+  if ($("engline")) $("engline").onclick = () => playLine({ fen: m.fen_before, legal: m.legal_before, ucis: (m.engine_line_uci || [m.engine_uci]).slice(0, 5), ev: m.eval_before, base: Math.max(cur - 1, 0) });
 }
 function graph() {
   const e = R.eval_series_white_pov, n = e.length - 1 || 1, y = (v) => 40 - Math.max(-5, Math.min(5, v)) * 8, x = (i) => i / n * 400;
@@ -324,23 +371,60 @@ async function tryMove(uci) {
 }
 async function evalStep(s) {
   try {
-    const r = await post("/api/pos", { fen: s.fen, moves: [], eval: true, ms: 700 });
-    s.ev = r.eval.cp / 100; s.best = r.eval.best_uci; s.pv = r.eval.pv_san;
+    const r = await getEngine(s.fen);
+    s.ev = r.eval.cp / 100; s.best = r.eval.best_uci; s.pv = r.eval.pv_san; if (r.tb) s.tb = r.tb;
   } catch { s.ev = s.ev == null ? 0 : s.ev; }
   if (X && curPos() === s) draw(false);
 }
-async function playLine(m) {
+async function playLine(src) {
   clearInterval(timer);
-  const ucis = (m.engine_line_uci || [m.engine_uci]).slice(0, 5);
-  let res; try { res = await post("/api/pos", { fen: m.fen_before, moves: ucis }); } catch { return; }
-  const base = { fen: m.fen_before, legal: m.legal_before, last: null, row: null, ev: m.eval_before };
-  X = { base: cur - 1 < 0 ? 0 : cur - 1, line: true, row: m, idx: 0, steps: [base, ...res.steps.map((st) => ({ fen: st.fen, legal: [], last: [st.uci.slice(0, 2), st.uci.slice(2, 4)], san: st.san, uci: st.uci, ev: m.eval_before }))] };
+  let res; try { res = await post("/api/pos", { fen: src.fen, moves: src.ucis }); } catch { return; }
+  const base = { fen: src.fen, legal: src.legal || [], last: null, row: null, ev: src.ev };
+  X = { base: src.base == null ? cur : src.base, line: true, src, idx: 0,
+    steps: [base, ...res.steps.map((st) => ({ fen: st.fen, legal: [], last: [st.uci.slice(0, 2), st.uci.slice(2, 4)], san: st.san, uci: st.uci, ev: src.ev }))] };
   draw(false);
   timer = setInterval(() => {
     if (!X || X.idx >= X.steps.length - 1) return clearInterval(timer);
     X.idx++; beep(soundFor(X.steps[X.idx].san)); draw(true);
   }, 850);
 }
+
+// ----------------------------------------------------- live engine lines
+const engCache = new Map();
+let linesTok = 0, linesTimer = null;
+function getEngine(fen) {
+  if (engCache.has(fen)) return engCache.get(fen);
+  const p = post("/api/pos", { fen, moves: [], eval: true, multipv: 3, ms: 900 }).catch((e) => { engCache.delete(fen); throw e; });
+  engCache.set(fen, p);
+  if (engCache.size > 300) engCache.delete(engCache.keys().next().value);
+  return p;
+}
+function refreshLines() {
+  const box = $("lines"), P = curPos(), fen = P.fen;
+  if (!$("linesOn").checked) { box.textContent = "Engine lines are off."; $("tbnote").style.display = "none"; return; }
+  const tok = ++linesTok; clearTimeout(linesTimer);
+  const cached = engCache.has(fen);
+  if (!cached) box.innerHTML = '<span class="mut">thinking…</span>';
+  linesTimer = setTimeout(async () => {
+    let r; try { r = await getEngine(fen); } catch { if (tok === linesTok) box.textContent = "Engine unavailable."; return; }
+    if (tok !== linesTok) return;
+    const tn = $("tbnote");
+    if (r.tb) { tn.style.display = ""; tn.textContent = "Tablebase: " + TBTXT[r.tb]; } else tn.style.display = "none";
+    if (!r.lines) { box.innerHTML = `<span class="mut">Game over${r.result ? " · " + esc(r.result) : ""}</span>`; return; }
+    box.innerHTML = r.lines.map((l, i) => {
+      const v = l.cp / 100;
+      return `<div class="eline" data-i="${i}"><span class="ev ${v >= 0 ? "pos" : "neg"}">${fmtEval(v)}</span><span class="mv"><b>${esc(l.pv_san[0] || "")}</b> ${esc(l.pv_san.slice(1, 7).join(" "))}</span></div>`;
+    }).join("") + `<div class="mut" style="font-size:11px;margin-top:2px">depth ${r.lines[0].depth || "?"} · click a line to play it</div>`;
+    box._lines = r.lines; box._P = P;
+  }, cached ? 0 : 250);
+}
+$("lines").onclick = (e) => {
+  const el = e.target.closest(".eline"); if (!el || !$("lines")._lines) return;
+  const l = $("lines")._lines[+el.dataset.i], P = $("lines")._P;
+  playLine({ fen: P.fen, legal: P.legal, ucis: l.pv_uci.slice(0, 8), ev: l.cp / 100, base: X ? X.base : cur });
+};
+$("linesOn").checked = LS.get("linesOn", true);
+$("linesOn").onchange = () => { LS.set("linesOn", $("linesOn").checked); if (R) refreshLines(); };
 
 $("first").onclick = () => go(0); $("prev").onclick = () => step(-1); $("next").onclick = () => step(1); $("last").onclick = () => go(1e9);
 $("flip").onchange = () => draw(false); $("arrow").onchange = () => draw(false);
@@ -430,6 +514,7 @@ async function loadInsights() {
    <div class="panel"><h2>Accuracy per game <span class="mut" style="font-weight:400;font-size:12px">(green win · red loss)</span></h2>${spark}</div>
    <div class="panel">${tbl(d.phases, "Phase")}</div><div class="panel">${tbl(d.pieces, "Piece moved", pn)}</div>
    <div class="panel">${tbl(d.situation, "Position", sn)}</div>
+   ${d.time && d.time.trouble.moves + d.time.normal.moves ? `<div class="panel">${tbl(d.time, "Clock", { trouble: "time trouble", normal: "normal" })}</div>` : ""}
    <div class="panel"><table><tr><th>Opening</th><th>games</th><th>W-D-L</th><th>avg acc</th></tr>${d.openings.map((o) => `<tr><td>${esc(o.name)}</td><td>${o.games}</td><td>${o.w}-${o.d}-${o.l}</td><td>${o.avgAcc}%</td></tr>`).join("")}</table></div>`;
 }
 
@@ -536,3 +621,5 @@ $("expHtml").onclick = async () => {
 <script>(${viewer.toString()})(${data});<\/script></body></html>`;
   download(fileBase() + "-review.html", html, "text/html");
 };
+
+api("/api/status").then((s) => { $("tbstat").textContent = s.tb ? `Tablebases: ${s.tb}-piece` : "Tablebases: not installed"; }).catch(() => {});

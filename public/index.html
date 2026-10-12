@@ -15,6 +15,7 @@
 <div class="row mut settings">
  <label>Pieces <select id="pset"></select></label>
  <label>Board size <input type="range" id="bsize" min="320" max="760" step="10"></label>
+ <span id="tbstat"></span>
 </div>
 
 <section class="tab on" id="tab-review">
@@ -37,8 +38,10 @@
   </div>
   <div>
    <div class="panel info" id="info"></div>
+   <div class="panel" id="linespanel"><div class="row" style="margin:0 0 6px"><h2 style="margin:0">Engine lines</h2><label class="mut" style="font-size:12px"><input type="checkbox" id="linesOn" checked> on</label><span id="tbnote" class="tag" style="display:none;background:#8d6fd1;color:#fff"></span></div><div id="lines" class="mut">…</div></div>
    <div class="panel"><svg id="graph" viewBox="0 0 400 80" width="100%" style="cursor:pointer"></svg></div>
-   <div class="panel"><table id="sum"></table></div>
+   <div class="panel" id="timepanel" style="display:none"><h2>Clock &amp; time</h2><svg id="tgraph" viewBox="0 0 400 120" width="100%" style="cursor:pointer"></svg><div id="tsum"></div></div>
+   <div class="panel" id="sum"></div>
    <div class="panel" id="moves"></div>
    <div class="row"><button class="sec sm" id="expPgn">Export annotated PGN</button><button class="sec sm" id="expHtml">Share as HTML file</button><a class="mut" id="dlpgn" style="font-size:13px;cursor:pointer">download report JSON</a></div>
   </div>

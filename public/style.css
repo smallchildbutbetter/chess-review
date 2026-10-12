@@ -64,3 +64,16 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:3px 6px;t
 .tips li{margin:6px 0}
 kbd{background:var(--sec);border-radius:4px;padding:1px 6px;font:12px ui-monospace,monospace}
 .fb{padding:8px 10px;border-radius:6px;margin:8px 0;font-weight:600}.fb.ok{background:var(--okbg)}.fb.no{background:var(--nobg)}.fb.neutral{background:var(--panel2)}
+
+/* summary card */
+.sumcard{display:grid;grid-template-columns:1fr 64px 40px 64px;gap:6px 4px;align-items:center;font-size:14px}
+.sumcard .nm{font-weight:700;text-align:center;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sumcard .v{text-align:center;font-weight:700}.sumcard .ic{width:26px;height:26px;border-radius:50%;margin:auto;color:#fff;font:800 12px/26px system-ui;text-align:center}
+.sumcard .tile{border-radius:6px;padding:7px 0;text-align:center;font-weight:800;font-size:17px}.tile.w{background:#fff;color:#222}.tile.b{background:#1b1a18;color:#eee;border:1px solid #444}
+.sumcard hr{grid-column:1/-1;width:100%;border:0;border-top:1px solid var(--hov);margin:2px 0}
+.sumcard .sub{color:var(--mut);font-size:12px;text-align:center}
+/* engine lines */
+.eline{display:flex;gap:8px;align-items:baseline;padding:5px 4px;border-radius:5px;cursor:pointer;font-size:14px}.eline:hover{background:var(--hov)}
+.eline .ev{min-width:54px;text-align:center;border-radius:4px;padding:1px 6px;font-weight:700;font-size:13px}.ev.pos{background:#fff;color:#222}.ev.neg{background:#1b1a18;color:#eee;border:1px solid #444}
+.eline .mv{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.eline b{color:var(--fg)}
+#tsum table td,#tsum table th{font-size:12.5px}

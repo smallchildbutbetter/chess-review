@@ -6,7 +6,9 @@ import json, os, sys
 import chess
 import chess.engine
 
-from analyze import cp, find_stockfish, MATE_CP
+from analyze import cp, find_stockfish, MATE_CP, open_tablebase, tb_wdl, tb_label, TB_CP
+
+TB = open_tablebase()
 
 
 def apply_moves(board, ucis):
@@ -27,23 +29,39 @@ def apply_moves(board, ucis):
 
 
 def handle(eng, req):
+    if req.get("cmd") == "status":
+        return {"tb": TB.largest if TB else 0}
     board = chess.Board(req["fen"]) if req.get("fen") else chess.Board()
     steps = apply_moves(board, req.get("moves", []))
     over = board.is_game_over()
     out = {"fen": board.fen(), "steps": steps, "legal": [m.uci() for m in board.legal_moves],
            "over": over, "result": board.result() if over else None}
+    tbw = tb_wdl(TB, board) if not over else None
+    if tbw is not None:
+        sign = 1 if board.turn == chess.WHITE else -1
+        out["tb"] = tb_label(sign * TB_CP[tbw])
     if req.get("eval"):
         if over:
             c = 0 if not board.is_checkmate() else (-MATE_CP if board.turn == chess.WHITE else MATE_CP)
             out["eval"] = {"cp": c, "best_uci": None, "pv_san": [], "depth": 0}
         else:
-            info = eng.analyse(board, chess.engine.Limit(time=min(float(req.get("ms", 600)), 5000) / 1000))
-            pv, tmp, sans = info.get("pv", []), board.copy(), []
-            for m in pv[:6]:
-                sans.append(tmp.san(m))
-                tmp.push(m)
-            out["eval"] = {"cp": cp(info["score"]), "best_uci": pv[0].uci() if pv else None,
-                           "pv_san": sans, "depth": info.get("depth")}
+            k = max(1, min(int(req.get("multipv", 1)), 5))
+            infos = eng.analyse(board, chess.engine.Limit(time=min(float(req.get("ms", 600)), 5000) / 1000), multipv=k)
+            if not isinstance(infos, list):
+                infos = [infos]
+            lines = []
+            for info in infos:
+                pv, tmp, sans = info.get("pv", []), board.copy(), []
+                for m in pv[:8]:
+                    sans.append(tmp.san(m))
+                    tmp.push(m)
+                lines.append({"cp": cp(info["score"]), "pv_san": sans, "pv_uci": [m.uci() for m in pv[:8]], "depth": info.get("depth")})
+            first = lines[0]
+            out["lines"] = lines
+            out["eval"] = {"cp": first["cp"], "best_uci": first["pv_uci"][0] if first["pv_uci"] else None,
+                           "pv_san": first["pv_san"][:6], "depth": first["depth"]}
+            if "tb" in out:
+                out["eval"]["cp"] = {"W": 900, "D": 0, "L": -900}[out["tb"]]
     return out
 
 
