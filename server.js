@@ -16,6 +16,11 @@ const PUBLIC = path.join(ROOT, "public");
 const REVIEWS = path.join(ROOT, "data", "reviews");
 const VERSION = 3;
 const PY = fs.existsSync(path.join(ROOT, ".venv")) ? path.join(ROOT, process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python") : "python3";
+const PROFILES = {   // depth, parallel engines, hash MB each, CPU niceness
+  light: { depth: 10, workers: 2, hash: 16, nice: 10 },
+  balanced: { depth: 14, workers: 4, hash: 64, nice: 0 },
+  deep: { depth: 18, workers: 8, hash: 128, nice: 0 },
+};
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 fs.mkdirSync(REVIEWS, { recursive: true });
 
@@ -44,9 +49,10 @@ function summaryOf(r) {
 
 // ----------------------------------------------------------- analyze (CLI)
 async function analyze(req, res) {
-  let pgn, depth;
-  try { ({ pgn, depth } = JSON.parse(await readBody(req))); } catch { return send(res, 400, { error: "bad json" }); }
-  depth = Math.min(Math.max(parseInt(depth) || 14, 8), 22);
+  let pgn, depth, profile;
+  try { ({ pgn, depth, profile } = JSON.parse(await readBody(req))); } catch { return send(res, 400, { error: "bad json" }); }
+  const pf = PROFILES[profile] || PROFILES.balanced;
+  depth = Math.min(Math.max(parseInt(depth) || pf.depth, 8), 22);
   pgn = String(pgn || "").trim();
   if (!pgn) return send(res, 400, { error: "empty PGN" });
   const id = crypto.createHash("sha1").update(VERSION + "|" + depth + "|" + pgn.replace(/\s+/g, " ")).digest("hex").slice(0, 12);
@@ -56,7 +62,7 @@ async function analyze(req, res) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chess-"));
   const inFile = path.join(dir, "game.pgn"), outFile = path.join(dir, "report.json");
   fs.writeFileSync(inFile, pgn);
-  const p = spawn(PY, [path.join(ROOT, "analyze.py"), inFile, "-d", String(depth), "-o", outFile]);
+  const p = spawn(PY, [path.join(ROOT, "analyze.py"), inFile, "-d", String(depth), "-w", String(pf.workers), "--hash", String(pf.hash), "--nice", String(pf.nice), "-o", outFile]);
   let err = "";
   p.stderr.on("data", (d) => {
     err += d;

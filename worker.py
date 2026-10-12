@@ -29,6 +29,9 @@ def apply_moves(board, ucis):
 
 
 def handle(eng, req):
+    if req.get("cmd") == "config":
+        eng.configure({"Threads": max(1, min(int(req.get("threads", 1)), 16)), "Hash": max(8, min(int(req.get("hash", 64)), 1024))})
+        return {"ok": True}
     if req.get("cmd") == "status":
         return {"tb": TB.largest if TB else 0}
     board = chess.Board(req["fen"]) if req.get("fen") else chess.Board()

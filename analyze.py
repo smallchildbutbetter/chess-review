@@ -153,7 +153,7 @@ def terminal_eval(b):
     return [{"cp": 0, "pv": []}]
 
 
-def analyse_all(boards, depth, sf_path, progress):
+def analyse_all(boards, depth, sf_path, progress, workers=None, hash_mb=64):
     """Top-2 lines for every position, using a pool of single-thread engines
     plus an on-disk cache keyed by (position, depth)."""
     cache = Cache(HERE / "data" / "eval_cache.db")
@@ -172,12 +172,12 @@ def analyse_all(boards, depth, sf_path, progress):
     if not todo:
         return results
 
-    n = max(1, min(len(todo), os.cpu_count() or 2, 8))
+    n = max(1, min(len(todo), workers or os.cpu_count() or 2, 8))
     pool, engines = queue.Queue(), []
     try:
         for _ in range(n):
             e = chess.engine.SimpleEngine.popen_uci(sf_path)
-            e.configure({"Threads": 1, "Hash": 64})
+            e.configure({"Threads": 1, "Hash": hash_mb})
             engines.append(e)
             pool.put(e)
 
@@ -380,14 +380,14 @@ def summarize(rows):
     return out
 
 
-def analyze(game, depth, sf_path, progress):
+def analyze(game, depth, sf_path, progress, workers=None, hash_mb=64):
     moves = list(game.mainline_moves())
     boards = [game.board()]
     for mv in moves:
         b = boards[-1].copy()
         b.push(mv)
         boards.append(b)
-    infos = analyse_all(boards, depth, sf_path, progress)
+    infos = analyse_all(boards, depth, sf_path, progress, workers, hash_mb)
     tb = open_tablebase()
     if tb:
         infos = apply_tablebase(boards, infos, tb)
@@ -402,14 +402,19 @@ def main():
     ap = argparse.ArgumentParser(description="Review a chess game with Stockfish.")
     ap.add_argument("pgn", help="PGN file path or a PGN string")
     ap.add_argument("-d", "--depth", type=int, default=14)
+    ap.add_argument("-w", "--workers", type=int, default=None, help="parallel engine processes (default: all cores, max 8)")
+    ap.add_argument("--hash", type=int, default=64, help="hash MB per engine")
+    ap.add_argument("--nice", type=int, default=0, help="lower CPU priority (0-19)")
     ap.add_argument("-o", "--out", default=str(HERE / "game_report.json"))
     a = ap.parse_args()
 
     def progress(done, total):
         print(f"\r{done}/{total}", end="", file=sys.stderr, flush=True)
 
+    if a.nice and hasattr(os, "nice"):
+        os.nice(a.nice)
     game = load_game(a.pgn)
-    rows, evals, opening, final, timing, tb_on = analyze(game, a.depth, find_stockfish(), progress)
+    rows, evals, opening, final, timing, tb_on = analyze(game, a.depth, find_stockfish(), progress, a.workers, a.hash)
     print(file=sys.stderr)
     summary = summarize(rows)
     report = {"version": 3, "tablebase": tb_on, "clocks": timing and {"base": timing["base"], "inc": timing["inc"], "trouble_at": timing["trouble_at"]}, "final_fen": final.fen(), "final_legal": [m.uci() for m in final.legal_moves],

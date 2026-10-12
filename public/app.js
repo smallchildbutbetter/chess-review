@@ -184,7 +184,7 @@ async function analyze() {
   $("err").textContent = ""; const pgn = $("pgn").value.trim(); if (!pgn) return;
   $("go").disabled = true; $("bar").style.display = "block"; $("bar").firstChild.style.width = "0";
   try {
-    const r = await fetch("/api/analyze", { method: "POST", body: JSON.stringify({ pgn, depth: $("depth").value }) });
+    const r = await fetch("/api/analyze", { method: "POST", body: JSON.stringify({ pgn, profile: $("profile").value }) });
     if (!r.ok) throw new Error((await r.json()).error);
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) {
@@ -390,11 +390,17 @@ async function playLine(src) {
 }
 
 // ----------------------------------------------------- live engine lines
+const PROFILE_LIVE = { light: { ms: 450, threads: 1, hash: 16 }, balanced: { ms: 900, threads: 2, hash: 64 }, deep: { ms: 1600, threads: 4, hash: 128 } };
+function applyProfile() {
+  const p = $("profile").value; LS.set("profile", p); engCache.clear();
+  post("/api/pos", { cmd: "config", threads: PROFILE_LIVE[p].threads, hash: PROFILE_LIVE[p].hash }).catch(() => {});
+  if (R) refreshLines();
+}
 const engCache = new Map();
 let linesTok = 0, linesTimer = null;
 function getEngine(fen) {
   if (engCache.has(fen)) return engCache.get(fen);
-  const p = post("/api/pos", { fen, moves: [], eval: true, multipv: 3, ms: 900 }).catch((e) => { engCache.delete(fen); throw e; });
+  const p = post("/api/pos", { fen, moves: [], eval: true, multipv: 3, ms: PROFILE_LIVE[$("profile").value].ms }).catch((e) => { engCache.delete(fen); throw e; });
   engCache.set(fen, p);
   if (engCache.size > 300) engCache.delete(engCache.keys().next().value);
   return p;
@@ -623,3 +629,5 @@ $("expHtml").onclick = async () => {
 };
 
 api("/api/status").then((s) => { $("tbstat").textContent = s.tb ? `Tablebases: ${s.tb}-piece` : "Tablebases: not installed"; }).catch(() => {});
+$("profile").value = LS.get("profile", "balanced");
+$("profile").onchange = applyProfile; applyProfile();

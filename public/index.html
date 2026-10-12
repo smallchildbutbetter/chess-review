@@ -21,7 +21,7 @@
 <section class="tab on" id="tab-review">
  <textarea id="pgn" placeholder="Paste PGN here, or use the Import tab…"></textarea>
  <div class="row"><button id="go">Analyze</button>
-  <label>Depth <select id="depth"><option>12</option><option selected>14</option><option>16</option><option>18</option></select></label>
+  <label>Engine <select id="profile"><option value="light">Light (depth 10, low CPU)</option><option value="balanced" selected>Balanced (depth 14)</option><option value="deep">Deep (depth 18)</option></select></label>
   <span id="err" class="err"></span><span id="opening" class="mut"></span></div>
  <div id="bar"><div></div></div>
  <div class="cols" id="review" style="display:none">
