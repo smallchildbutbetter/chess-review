@@ -3,16 +3,16 @@
 <title>Chess Review</title>
 <link rel="stylesheet" href="style.css">
 </head><body><main>
-<header>
- <h1>♟ Chess Review <span class="mut" style="font-weight:400;font-size:13px">local · Stockfish</span></h1>
+<header class="top">
+ <div class="brand"><span class="mark">♞</span>Chess Review <small>local · Stockfish</small></div>
  <nav id="nav">
   <button data-tab="review" class="on">Review</button><button data-tab="import">Import</button>
   <button data-tab="history">History</button><button data-tab="insights">Insights</button>
  </nav>
- <span style="flex:1"></span>
- <label class="mut" style="font-size:13px">Me: <input id="me" size="14" placeholder="your username"></label>
+ <span class="spacer"></span>
+ <label class="who">Me <input id="me" placeholder="your username"></label>
 </header>
-<div class="row mut settings">
+<div class="toolbar">
  <label>Pieces <select id="pset"></select></label>
  <label>Board size <input type="range" id="bsize" min="320" max="760" step="10"></label>
  <span id="tbstat"></span>
@@ -20,8 +20,8 @@
 
 <section class="tab on" id="tab-review">
  <textarea id="pgn" placeholder="Paste PGN here, or use the Import tab…"></textarea>
- <div class="row"><button id="go">Analyze</button>
-  <label>Engine <select id="profile"><option value="light">Light (depth 10, low CPU)</option><option value="balanced" selected>Balanced (depth 14)</option><option value="deep">Deep (depth 18)</option></select></label>
+ <div class="row" style="margin-top:12px"><button id="go">Analyze</button>
+  <label>Engine <select id="profile"><option value="light">Light · depth 10</option><option value="balanced" selected>Balanced · depth 14</option><option value="deep">Deep · depth 18</option></select></label>
   <span id="err" class="err"></span><span id="opening" class="mut"></span></div>
  <div id="bar"><div></div></div>
  <div class="cols" id="review" style="display:none">
@@ -34,11 +34,11 @@
     <label><input type="checkbox" id="flip"> flip</label><label><input type="checkbox" id="arrow" checked> arrow</label>
     <label><input type="checkbox" id="snd" checked> sound</label><span class="picks" id="themes"></span>
    </div>
-   <div class="mut" style="font-size:12px;margin-top:8px"><kbd>←</kbd><kbd>→</kbd> step · <kbd>↑</kbd><kbd>↓</kbd> start/end · <kbd>F</kbd> flip · <kbd>A</kbd> arrow · <kbd>M</kbd> mute · <kbd>Esc</kbd> exit variation · drag any piece to try a move</div>
+   <div class="hints"><kbd>←</kbd><kbd>→</kbd> step · <kbd>↑</kbd><kbd>↓</kbd> start/end · <kbd>F</kbd> flip · <kbd>A</kbd> arrow · <kbd>M</kbd> mute · <kbd>Esc</kbd> exit variation · drag any piece to try a move</div>
   </div>
   <div>
    <div class="panel info" id="info"></div>
-   <div class="panel" id="linespanel"><div class="row" style="margin:0 0 6px"><h2 style="margin:0">Engine lines</h2><label class="mut" style="font-size:12px"><input type="checkbox" id="linesOn" checked> on</label><span id="tbnote" class="tag" style="display:none;background:#8d6fd1;color:#fff"></span></div><div id="lines" class="mut">…</div></div>
+   <div class="panel" id="linespanel"><div class="row" style="margin:0 0 6px"><h2 style="margin:0">Engine lines</h2><label class="mut" style="font-size:12px;margin-left:auto"><input type="checkbox" id="linesOn" checked>on</label><span id="tbnote" class="tag" style="display:none;--c:#a78bfa"></span></div><div id="lines" class="mut">…</div></div>
    <div class="panel"><svg id="graph" viewBox="0 0 400 80" width="100%" style="cursor:pointer"></svg></div>
    <div class="panel" id="timepanel" style="display:none"><h2>Clock &amp; time</h2><svg id="tgraph" viewBox="0 0 400 120" width="100%" style="cursor:pointer"></svg><div id="tsum"></div></div>
    <div class="panel" id="sum"></div>

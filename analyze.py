@@ -114,8 +114,14 @@ def apply_tablebase(boards, infos, tb):
 
 
 # ---------------------------------------------------------------- opening book
+_OPENINGS = None
+
+
 def load_openings():
     """EPD -> (eco, name) from the lichess chess-openings TSVs (CC0)."""
+    global _OPENINGS
+    if _OPENINGS is not None:
+        return _OPENINGS
     db = {}
     for f in sorted((HERE / "openings").glob("*.tsv")):
         for line in f.read_text().splitlines()[1:]:
@@ -125,6 +131,7 @@ def load_openings():
             for mv in g.mainline_moves():
                 b.push(mv)
             db[b.epd()] = (eco, name)
+    _OPENINGS = db
     return db
 
 
@@ -341,6 +348,64 @@ def build_rows(boards, moves, infos, book, timing=None):
     return rows, opening
 
 
+def time_class(headers):
+    base, inc = parse_tc(headers.get("TimeControl", ""))
+    if base is None:
+        return "rapid"
+    est = base + 40 * inc
+    return "bullet" if est < 180 else "blitz" if est < 480 else "rapid" if est < 1500 else "classical"
+
+
+def skill_accuracy(rows, color):
+    """Accuracy over moves that say something about skill: not book, not forced,
+    and not in positions that were already decided (|eval| >= 5 pawns)."""
+    use = [r for r in rows if r["color"] == color and r["classification"] != "Book"
+           and len(r["legal_before"]) > 1 and abs(r["eval_before"]) < 5.0]
+    return accuracy([r["accuracy"] for r in use]), len(use)
+
+
+_CALIB = None
+
+
+def load_calibration():
+    global _CALIB
+    if _CALIB is None:
+        f = HERE / "calibration.json"
+        _CALIB = json.loads(f.read_text()) if f.exists() else {}
+    return _CALIB
+
+
+def rate_player(rows, color, headers):
+    """Estimated performance rating with an uncertainty, calibrated on public games.
+    Returns None when there are too few informative moves."""
+    acc, n = skill_accuracy(rows, color)
+    if acc is None or n < 12:
+        return {"rating": None, "note": "not enough moves"}
+    calib = load_calibration()
+    site = "chesscom" if "chess.com" in headers.get("Site", "").lower() else "lichess" if "lichess" in headers.get("Site", "").lower() else "all"
+    cls = time_class(headers)
+    cls = "rapid" if cls == "classical" else cls
+    fit = next((calib["fit"][k] for k in (f"{site}:{cls}", f"{site}:all", f"all:{cls}", "all:all")
+                if calib.get("fit") and k in calib["fit"]), None)
+    if fit:
+        raw = fit["a"] + fit["b"] * acc
+        sd = min(600.0, fit["sd"] * math.sqrt(max(1.0, calib.get("ref_moves", 35) / n)))
+    else:  # uncalibrated fallback: rough centipawn-loss rule of thumb
+        drops = [min(r["eval_drop"] * 100, 500) for r in rows if r["color"] == color and r["classification"] != "Book"]
+        raw, sd = 3100 * math.exp(-0.01 * (sum(drops) / max(1, len(drops)))), 450.0
+    raw = max(300.0, min(2900.0, raw))
+    est, post_sd, known = raw, sd, None
+    k = headers.get("WhiteElo" if color == "white" else "BlackElo", "")
+    if k.isdigit() and int(k) > 0:
+        known, prior_sd = int(k), 200.0
+        w_p, w_g = 1 / prior_sd ** 2, 1 / sd ** 2
+        est = (known * w_p + raw * w_g) / (w_p + w_g)
+        post_sd = math.sqrt(1 / (w_p + w_g))
+    return {"rating": int(round(est / 10) * 10), "sd": int(round(post_sd / 10) * 10),
+            "evidence": int(round(raw / 10) * 10), "known": known, "n": n, "accuracy": acc,
+            "calibrated": bool(fit), "class": cls, "site": site}
+
+
 def est_rating(acpl):
     """Rough strength estimate from average centipawn loss (heuristic, not Elo-calibrated)."""
     return int(max(300, min(2900, round(3100 * math.exp(-0.01 * acpl) / 50) * 50)))
@@ -417,6 +482,10 @@ def main():
     rows, evals, opening, final, timing, tb_on = analyze(game, a.depth, find_stockfish(), progress, a.workers, a.hash)
     print(file=sys.stderr)
     summary = summarize(rows)
+    for c in ("white", "black"):
+        info = rate_player(rows, c, game.headers)
+        summary[c]["rating_info"] = info
+        summary[c]["rating"] = info["rating"]
     report = {"version": 3, "tablebase": tb_on, "clocks": timing and {"base": timing["base"], "inc": timing["inc"], "trouble_at": timing["trouble_at"]}, "final_fen": final.fen(), "final_legal": [m.uci() for m in final.legal_moves],
               "opening": opening, "headers": dict(game.headers), "depth": a.depth,
               "result": game.headers.get("Result", "*"), "eval_series_white_pov": evals,

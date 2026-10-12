@@ -19,7 +19,7 @@ const CL = {
   Book: ["#a88865", "B"], Inaccuracy: ["#f7c631", "?!"], Miss: ["#ee6b55", "×"], Mistake: ["#e58f2a", "?"], Blunder: ["#ca3431", "??"],
 };
 const BAD = ["Miss", "Mistake", "Blunder"];
-const tag = (c) => `<span class="tag ${c}" style="background:${CL[c][0]}">${CL[c][1]} ${c}</span>`;
+const tag = (c) => `<span class="tag" style="--c:${CL[c][0]}">${CL[c][1]} ${c}</span>`;
 const fmtEval = (v) => (Math.abs(v) >= 10 ? (v > 0 ? "+M" : "-M") : (v > 0 ? "+" : "") + v.toFixed(2));
 const me = () => ($("me").value || "").trim();
 
@@ -210,7 +210,16 @@ function summaryCard() {
   const s = R.summary, h = R.headers, nm = (n) => `<div class="nm" title="${esc(n)}">${esc(n)}</div>`;
   let g = `<div class="sumcard"><div></div>${nm(h.White || "White")}<div></div>${nm(h.Black || "Black")}`;
   g += `<div>Accuracy</div><div class="tile w">${s.white.accuracy}</div><div></div><div class="tile b">${s.black.accuracy}</div>`;
-  if (s.white.rating) g += `<div title="Rough estimate from average centipawn loss, not an official rating">Est. game rating</div><div class="tile w" style="font-size:15px">${s.white.rating}</div><div></div><div class="tile b" style="font-size:15px">${s.black.rating}</div>`;
+  const ri = (c) => s[c].rating_info;
+  if (s.white.rating !== undefined && ri("white")) {
+    const tile = (c, cls) => {
+      const i = ri(c);
+      if (!i || i.rating == null) return `<div class="tile ${cls}" style="font-size:12px" title="Fewer than 12 informative moves">${esc((i && i.note) || "n/a")}</div>`;
+      const tip = `${i.calibrated ? "Calibrated on public " + (i.site === "chesscom" ? "Chess.com" : i.site === "lichess" ? "Lichess" : "") + " games (" + i.class + ")" : "Uncalibrated rule of thumb"}.\nGame evidence alone: ${i.evidence}. ${i.known ? "Blended with the listed rating " + i.known + "." : "No listed rating to blend."}\nBased on ${i.n} informative moves; ± is roughly an 80% range.`;
+      return `<div class="tile ${cls}" style="font-size:16px" title="${esc(tip)}">${i.rating}<div class="sub" style="font-size:11px;font-weight:600;color:${cls === "w" ? "#777" : "#aaa"}">±${Math.round(i.sd * 1.28 / 10) * 10}${i.calibrated ? "" : " (rough)"}</div></div>`;
+    };
+    g += `<div title="Estimated performance rating for this game, calibrated on real games. Hover a tile for details.">Est. game rating</div>${tile("white", "w")}<div></div>${tile("black", "b")}`;
+  } else if (s.white.rating) g += `<div title="Rough estimate from average centipawn loss">Est. game rating</div><div class="tile w" style="font-size:15px">${s.white.rating}</div><div></div><div class="tile b" style="font-size:15px">${s.black.rating}</div>`;
   g += "<hr>";
   for (const k of ORDER.filter((k) => s.white.counts[k] || s.black.counts[k]))
     g += `<div>${k}</div><div class="v" style="color:${CL[k][0]}">${s.white.counts[k]}</div><div class="ic" style="background:${CL[k][0]}">${CL[k][1]}</div><div class="v" style="color:${CL[k][0]}">${s.black.counts[k]}</div>`;
@@ -291,8 +300,8 @@ function evalbar(v) {
   const fl = $("flip").checked, t = $("evaltxt");
   if (v == null) { t.textContent = "…"; return; }
   const p = 50 + 50 * (2 / (1 + Math.exp(-0.4 * v)) - 1);
-  $("evalfill").style.height = (fl ? 100 - p : p) + "%"; $("evalfill").style.background = fl ? "#222" : "#fff";
-  $("evalbar").style.background = fl ? "#fff" : "#403d39";
+  $("evalfill").style.height = (fl ? 100 - p : p) + "%"; $("evalfill").style.background = fl ? "#1b1c20" : "#f4f4f5";
+  $("evalbar").style.background = fl ? "#f4f4f5" : "#2a2c31";
   const atTop = (v >= 0) === fl;
   t.textContent = (v > 0 ? "+" : "") + (Math.abs(v) >= 10 ? "M" : v.toFixed(1));
   t.style.top = atTop ? "2px" : "auto"; t.style.bottom = atTop ? "auto" : "2px"; t.style.color = atTop ? "#fff" : "#222";
@@ -310,7 +319,7 @@ function info() {
   if (X) {
     const sans = X.steps.slice(1, X.idx + 1).map((s) => s.san).join(" ");
     let h = `<div class="expbanner"><b>${X.line ? "Engine line" : "Variation"}</b> <span>${esc(sans) || "start"}</span><button class="sec sm" id="xexit">Back to game (Esc)</button>${X.line ? '<button class="sec sm" id="xplay">▶ Replay</button>' : ""}</div>`;
-    if (P.tb) h += `<span class="tag" style="background:#8d6fd1;color:#fff">Tablebase: ${TBTXT[P.tb]}</span>`;
+    if (P.tb) h += `<span class="tag" style="--c:#a78bfa">Tablebase: ${TBTXT[P.tb]}</span>`;
     else if (P.ev != null) h += `Eval <b>${fmtEval(P.ev)}</b>${P.over ? ` · game over ${esc(P.result || "")}` : ""}`;
     else h += '<span class="mut">engine thinking…</span>';
     if (P.pv && P.pv.length) h += `<br><span class="mut">Engine: ${esc(P.pv.join(" "))}</span>`;
@@ -320,7 +329,7 @@ function info() {
   }
   const m = P.row;
   if (!m) { box.innerHTML = `<b class="big">${esc(R.headers.White || "White")} vs ${esc(R.headers.Black || "Black")}</b><br><span class="mut">${esc(R.result)} · depth ${R.depth}</span>`; return; }
-  let h = `<b class="big">${m.move_number}${m.color === "white" ? "." : "..."} ${esc(m.san)}</b> ${tag(m.classification)}<br>${m.tb_after ? `<span class="tag" style="background:#8d6fd1;color:#fff">Tablebase: ${TBTXT[m.tb_after]}</span>` : `Eval ${fmtEval(m.eval_after)}`} · win chance lost ${m.loss}%` +
+  let h = `<b class="big">${m.move_number}${m.color === "white" ? "." : "..."} ${esc(m.san)}</b> ${tag(m.classification)}<br>${m.tb_after ? `<span class="tag" style="--c:#a78bfa">Tablebase: ${TBTXT[m.tb_after]}</span>` : `Eval ${fmtEval(m.eval_after)}`} · win chance lost ${m.loss}%` +
     (m.time_spent != null ? `<br><span class="mut">⏱ ${m.time_spent}s · ${fmtClock(m.clock)} left${m.time_trouble ? " · time trouble" : ""}</span>` : "");
   if (!["Best", "Brilliant", "Great", "Book", "Excellent"].includes(m.classification) && m.engine_best)
     h += `<br>Engine preferred <b>${esc(m.engine_best)}</b>: <span class="line" id="engline">${esc(m.engine_line.slice(1, 5).join(" ")) || "▶ play"} ▶</span>`;
