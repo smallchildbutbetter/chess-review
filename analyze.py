@@ -364,6 +364,25 @@ def skill_accuracy(rows, color):
     return accuracy([r["accuracy"] for r in use]), len(use)
 
 
+def skill_features(rows, color):
+    """Features of the informative moves used for rating calibration."""
+    use = [r for r in rows if r["color"] == color and r["classification"] != "Book"
+           and len(r["legal_before"]) > 1 and abs(r["eval_before"]) < 5.0]
+    n = len(use)
+    if not n:
+        return None
+    return {"n": n, "acc": accuracy([r["accuracy"] for r in use]),
+            "mean_loss": sum(r["loss"] for r in use) / n,
+            "err": sum(r["loss"] >= 10 for r in use) / n,        # mistakes and blunders
+            "good": sum(r["loss"] < 2 for r in use) / n,         # best/excellent
+            "big": sum(r["loss"] >= 20 for r in use) / n}        # blunders
+
+
+def feature_vector(f):
+    """Model inputs: log average win%-loss and the share of near-perfect moves."""
+    return [math.log(1 + f["mean_loss"]), f["good"]]
+
+
 _CALIB = None
 
 
@@ -378,9 +397,10 @@ def load_calibration():
 def rate_player(rows, color, headers):
     """Estimated performance rating with an uncertainty, calibrated on public games.
     Returns None when there are too few informative moves."""
-    acc, n = skill_accuracy(rows, color)
-    if acc is None or n < 12:
+    feats = skill_features(rows, color)
+    if not feats or feats["n"] < 12:
         return {"rating": None, "note": "not enough moves"}
+    acc, n = feats["acc"], feats["n"]
     calib = load_calibration()
     site = "chesscom" if "chess.com" in headers.get("Site", "").lower() else "lichess" if "lichess" in headers.get("Site", "").lower() else "all"
     cls = time_class(headers)
@@ -388,7 +408,7 @@ def rate_player(rows, color, headers):
     fit = next((calib["fit"][k] for k in (f"{site}:{cls}", f"{site}:all", f"all:{cls}", "all:all")
                 if calib.get("fit") and k in calib["fit"]), None)
     if fit:
-        raw = fit["a"] + fit["b"] * acc
+        raw = fit["a"] + sum(w * x for w, x in zip(fit["w"], feature_vector(feats)))
         sd = min(600.0, fit["sd"] * math.sqrt(max(1.0, calib.get("ref_moves", 35) / n)))
     else:  # uncalibrated fallback: rough centipawn-loss rule of thumb
         drops = [min(r["eval_drop"] * 100, 500) for r in rows if r["color"] == color and r["classification"] != "Book"]

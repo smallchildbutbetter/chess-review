@@ -195,9 +195,9 @@ def cmd_analyze(a):
             continue
         h, samples = game.headers, []
         for color, key in (("white", "WhiteElo"), ("black", "BlackElo")):
-            acc, n = A.skill_accuracy(rows, color)
-            if acc is not None and n >= 12:
-                samples.append({"site": g["site"], "cls": A.time_class(h), "rating": int(h[key]), "acc": acc, "n": n})
+            f = A.skill_features(rows, color)
+            if f and f["n"] >= 12:
+                samples.append({"site": g["site"], "cls": A.time_class(h), "rating": int(h[key]), **f})
         done[f"{g['site']}:{g['id']}"] = samples
         if i % 5 == 0 or i == len(todo):
             sf_out.write_text(json.dumps(done))
@@ -207,16 +207,31 @@ def cmd_analyze(a):
 
 
 # ------------------------------------------------------------------------- fit
-def ols(xs, ys):
-    n = len(xs)
-    mx, my = sum(xs) / n, sum(ys) / n
-    sxx = sum((x - mx) ** 2 for x in xs)
-    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
-    a = my - b * mx
-    res = [y - (a + b * x) for x, y in zip(xs, ys)]
-    sse = sum(r * r for r in res)
+def solve(A_, b_):
+    """Gaussian elimination for small normal equations."""
+    n = len(b_)
+    M = [row[:] + [b_[i]] for i, row in enumerate(A_)]
+    for i in range(n):
+        p = max(range(i, n), key=lambda r: abs(M[r][i]))
+        M[i], M[p] = M[p], M[i]
+        for r in range(n):
+            if r != i:
+                f = M[r][i] / M[i][i]
+                M[r] = [x - f * y for x, y in zip(M[r], M[i])]
+    return [M[i][n] / M[i][i] for i in range(n)]
+
+
+def ols(X, ys):
+    """Least squares rating ~ a + w.x"""
+    n, k = len(X), len(X[0]) + 1
+    D = [[1.0] + list(x) for x in X]
+    XtX = [[sum(d[i] * d[j] for d in D) for j in range(k)] for i in range(k)]
+    Xty = [sum(d[i] * y for d, y in zip(D, ys)) for i in range(k)]
+    beta = solve(XtX, Xty)
+    res = [y - sum(b * v for b, v in zip(beta, d)) for d, y in zip(D, ys)]
+    sse, my = sum(r * r for r in res), sum(ys) / n
     sst = sum((y - my) ** 2 for y in ys)
-    return {"a": round(a, 2), "b": round(b, 3), "sd": round(math.sqrt(sse / max(1, n - 2)), 1),
+    return {"a": round(beta[0], 2), "w": [round(b, 3) for b in beta[1:]], "sd": round(math.sqrt(sse / max(1, n - k)), 1),
             "r2": round(1 - sse / sst, 3), "n": n}
 
 
@@ -234,9 +249,9 @@ def cmd_fit(a):
         if len(ss) < a.min_samples:
             print(f"  {key}: only {len(ss)} samples, skipped")
             continue
-        fit[key] = ols([s["acc"] for s in ss], [s["rating"] for s in ss])
+        fit[key] = ols([A.feature_vector(s) for s in ss], [s["rating"] for s in ss])
         f = fit[key]
-        print(f"  {key:16} n={f['n']:4}  rating = {f['a']:.0f} + {f['b']:.1f}*acc   sd={f['sd']:.0f}  R2={f['r2']}")
+        print(f"  {key:16} n={f['n']:4}  w={f['w']}  sd={f['sd']:.0f}  R2={f['r2']}")
     ref = round(sum(s["n"] for s in samples) / len(samples))
     (A.HERE / "calibration.json").write_text(json.dumps(
         {"version": 1, "depth": DEPTH, "ref_moves": ref, "samples": len(samples), "fit": fit}, indent=1))

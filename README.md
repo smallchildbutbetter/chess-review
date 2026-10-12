@@ -21,7 +21,7 @@ on Windows download Stockfish and place the exe at `engines\stockfish.exe` (`sta
 - **Insights**: set "Me" to your username; stats by phase, piece, position type and opening, plus weak spots.
 - **Engine lines**: live top-3 candidate lines beside the board, updating as you step or try moves; click one to play it out.
 - **Clock & time**: per-move time spent, clock graph, time-trouble errors (needs a PGN with clock times, e.g. Chess.com or Lichess imports).
-- **Game rating**: a rough estimated rating per player from average centipawn loss, shown next to accuracy.
+- **Game rating**: estimated performance rating per player with a +/- range, calibrated on ~380 real player-games from Lichess and Chess.com (`calibration.json`). It skips book, forced and already-decided moves, uses separate fits per time control, and blends in the rating listed in the PGN. One game is a noisy sample, so treat it as a rough guide. Re-fit with more data using `python calibrate.py all --seed-users 25 --per-band 60 --force`.
 - **Tablebases (optional)**: run `./get_tablebases.sh` (~396 MB) for exact win/draw/loss in endings with 5 or fewer pieces.
 - **Display**: nine drawn piece sets plus text glyphs, board-size slider, dark theme.
 - **Export**: annotated PGN, or a single self-contained HTML file to share a review.
