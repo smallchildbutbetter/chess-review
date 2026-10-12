@@ -211,12 +211,21 @@ function summaryCard() {
   let g = `<div class="sumcard"><div></div>${nm(h.White || "White")}<div></div>${nm(h.Black || "Black")}`;
   g += `<div>Accuracy</div><div class="tile w">${s.white.accuracy}</div><div></div><div class="tile b">${s.black.accuracy}</div>`;
   const ri = (c) => s[c].rating_info;
+  const peerTile = (c, cls) => {
+    const i = ri(c), p = i && i.peers;
+    if (!p) return `<div class="tile ${cls}" style="font-size:12px" title="Needs a listed rating between ${esc(String(500))} and ${esc(String(1300))}">n/a</div>`;
+    const ord = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+    return `<div class="tile ${cls}" style="font-size:16px" title="Better than ${p.pct}% of ${p.n} reference games by ${p.band[0]}–${p.band[1]} rated players (same time control). One game is a noisy sample.">${ord(p.pct)}<div class="sub" style="font-size:11px;font-weight:600;color:${cls === "w" ? "#777" : "#aaa"}">percentile</div></div>`;
+  };
+  if (s.white.rating_info && s.white.rating_info.reliable === false)
+    g += `<div title="At 600–1200, one game's accuracy barely predicts rating, so no rating is shown. This compares each player with others of the same listed rating.">Vs. same-rated players</div>${peerTile("white", "w")}<div></div>${peerTile("black", "b")}`;
+  else
   if (s.white.rating !== undefined && ri("white")) {
     const tile = (c, cls) => {
       const i = ri(c);
       if (!i || i.rating == null) return `<div class="tile ${cls}" style="font-size:12px" title="Fewer than 12 informative moves">${esc((i && i.note) || "n/a")}</div>`;
       const tip = `${i.calibrated ? "Calibrated on public " + (i.site === "chesscom" ? "Chess.com" : i.site === "lichess" ? "Lichess" : "") + " games (" + i.class + ")" : "Uncalibrated rule of thumb"}.\nGame evidence alone: ${i.evidence}. ${i.known ? "Blended with the listed rating " + i.known + "." : "No listed rating to blend."}\nBased on ${i.n} informative moves; ± is roughly an 80% range.`;
-      return `<div class="tile ${cls}" style="font-size:16px" title="${esc(tip)}">${i.rating}<div class="sub" style="font-size:11px;font-weight:600;color:${cls === "w" ? "#777" : "#aaa"}">±${Math.round(i.sd * 1.28 / 10) * 10}${i.calibrated ? "" : " (rough)"}</div></div>`;
+      return `<div class="tile ${cls}" style="font-size:16px" title="${esc(tip)}">${i.rating}<div class="sub" style="font-size:11px;font-weight:600;color:${cls === "w" ? "#777" : "#aaa"}">±${Math.round(i.sd * 1.28 / 10) * 10}${i.calibrated ? "" : " (rough)"}${i.outside_range ? " · outside 600–1200" : ""}</div></div>`;
     };
     g += `<div title="Estimated performance rating for this game, calibrated on real games. Hover a tile for details.">Est. game rating</div>${tile("white", "w")}<div></div>${tile("black", "b")}`;
   } else if (s.white.rating) g += `<div title="Rough estimate from average centipawn loss">Est. game rating</div><div class="tile w" style="font-size:15px">${s.white.rating}</div><div></div><div class="tile b" style="font-size:15px">${s.black.rating}</div>`;
@@ -232,8 +241,8 @@ function summaryCard() {
 }
 function timePanel() {
   const ok = R.clocks && R.moves.some((m) => m.time_spent != null);
-  $("timepanel").style.display = ok ? "block" : "none";
-  if (!ok) return;
+  $("tabClock").style.display = ok ? "" : "none";
+  if (!ok) { if ($("pane-clock").classList.contains("on")) rtab("moves"); return; }
   const n = R.moves.length, base = R.clocks.base || Math.max(...R.moves.map((m) => m.clock || 0)) || 1;
   const x = (i) => (i + 0.5) / n * 400, cy = (c) => 52 - Math.min(1, c / base) * 46;
   const line = (col) => R.moves.map((m, i) => (m.color === col && m.clock != null ? `${x(i)},${cy(m.clock)}` : null)).filter(Boolean).join(" ");
@@ -264,7 +273,9 @@ $("tgraph").onclick = (ev) => { const b = ev.currentTarget.getBoundingClientRect
 function showReport(rep) {
   R = rep; X = null; cur = 0; clearInterval(timer);
   showTab("review");
-  $("review").style.display = "grid";
+  $("composer").style.display = "none"; $("gamebar").style.display = "flex";
+  $("gtitle").textContent = `${rep.headers.White || "White"} vs ${rep.headers.Black || "Black"}`;
+  $("review").style.display = "grid"; syncHeight();
   $("opening").textContent = R.opening ? `📖 ${R.opening.eco} · ${R.opening.name}` : "";
   const h = R.headers, u = me().toLowerCase();
   $("flip").checked = !!u && (h.Black || "").toLowerCase() === u;
@@ -293,8 +304,22 @@ function draw(animate) {
   evalbar(P.ev);
   players(); info(); graph(); if (R.clocks) timePanel(); refreshLines();
   document.querySelectorAll("#moves .m").forEach((e) => e.classList.toggle("cur", !X && +e.dataset.i === cur));
-  const c = document.querySelector("#moves .cur"); if (c) c.scrollIntoView({ block: "nearest" });
+  keepMoveVisible();
 }
+
+function keepMoveVisible() {
+  const body = document.querySelector(".rp-body"), c = document.querySelector("#moves .cur");
+  if (!body || !c || !$("pane-moves").classList.contains("on")) return;
+  const top = c.offsetTop, bot = top + c.offsetHeight;
+  if (top < body.scrollTop) body.scrollTop = Math.max(0, top - 6);
+  else if (bot > body.scrollTop + body.clientHeight) body.scrollTop = bot - body.clientHeight + 6;
+}
+function rtab(n) {
+  document.querySelectorAll("#rtabs button").forEach((b) => b.classList.toggle("on", b.dataset.r === n));
+  document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("on", p.id === "pane-" + n));
+  LS.set("rtab", n); if (n === "moves") keepMoveVisible();
+}
+$("rtabs").onclick = (e) => { if (e.target.dataset.r) rtab(e.target.dataset.r); };
 
 function evalbar(v) {
   const fl = $("flip").checked, t = $("evaltxt");
@@ -337,12 +362,14 @@ function info() {
   if ($("engline")) $("engline").onclick = () => playLine({ fen: m.fen_before, legal: m.legal_before, ucis: (m.engine_line_uci || [m.engine_uci]).slice(0, 5), ev: m.eval_before, base: Math.max(cur - 1, 0) });
 }
 function graph() {
-  const e = R.eval_series_white_pov, n = e.length - 1 || 1, y = (v) => 40 - Math.max(-5, Math.min(5, v)) * 8, x = (i) => i / n * 400;
-  const pts = e.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  const W = Math.max(200, Math.round($("graph").getBoundingClientRect().width) || 400), H = 52, mid = H / 2;
+  const e = R.eval_series_white_pov, n = e.length - 1 || 1, y = (v) => mid - Math.max(-5, Math.min(5, v)) * (mid - 3) / 5, x = (i) => i / n * W;
+  const pts = e.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   let d = "";
-  R.moves.forEach((m, i) => { if (["Brilliant", "Great", ...BAD].includes(m.classification)) d += `<circle cx="${x(i + 1)}" cy="${y(m.eval_after)}" r="2.6" fill="${CL[m.classification][0]}"/>`; });
+  R.moves.forEach((m, i) => { if (["Brilliant", "Great", ...BAD].includes(m.classification)) d += `<circle cx="${x(i + 1).toFixed(1)}" cy="${y(m.eval_after).toFixed(1)}" r="3" fill="${CL[m.classification][0]}"/>`; });
   const idx = X ? X.base : cur;
-  $("graph").innerHTML = `<rect width="400" height="80" style="fill:var(--bg)"/><polygon points="0,40 ${pts} 400,40" style="fill:var(--gfill)" opacity=".85"/><line x1="0" x2="400" y1="40" y2="40" style="stroke:var(--gline)"/>${d}<line x1="${x(idx)}" x2="${x(idx)}" y1="0" y2="80" stroke="#f6f669" stroke-width="2"/>`;
+  $("graph").setAttribute("viewBox", `0 0 ${W} ${H}`);
+  $("graph").innerHTML = `<rect width="${W}" height="${H}" style="fill:var(--bg)"/><polygon points="0,${mid} ${pts} ${W},${mid}" style="fill:var(--gfill)" opacity=".9"/><line x1="0" x2="${W}" y1="${mid}" y2="${mid}" style="stroke:var(--gline)"/>${d}<line x1="${x(idx).toFixed(1)}" x2="${x(idx).toFixed(1)}" y1="0" y2="${H}" stroke="#f6f669" stroke-width="2"/>`;
 }
 $("graph").onclick = (ev) => { const b = ev.currentTarget.getBoundingClientRect(); go(Math.round((ev.clientX - b.left) / b.width * R.moves.length)); };
 
@@ -416,7 +443,7 @@ function getEngine(fen) {
 }
 function refreshLines() {
   const box = $("lines"), P = curPos(), fen = P.fen;
-  if (!$("linesOn").checked) { box.textContent = "Engine lines are off."; $("tbnote").style.display = "none"; return; }
+  if (!$("linesOn").checked) { box.textContent = "Engine line is off (Settings)."; $("tbnote").style.display = "none"; return; }
   const tok = ++linesTok; clearTimeout(linesTimer);
   const cached = engCache.has(fen);
   if (!cached) box.innerHTML = '<span class="mut">thinking…</span>';
@@ -426,10 +453,11 @@ function refreshLines() {
     const tn = $("tbnote");
     if (r.tb) { tn.style.display = ""; tn.textContent = "Tablebase: " + TBTXT[r.tb]; } else tn.style.display = "none";
     if (!r.lines) { box.innerHTML = `<span class="mut">Game over${r.result ? " · " + esc(r.result) : ""}</span>`; return; }
-    box.innerHTML = r.lines.map((l, i) => {
+    const N = +$("linesN").value;
+    box.innerHTML = r.lines.slice(0, N).map((l, i) => {
       const v = l.cp / 100;
-      return `<div class="eline" data-i="${i}"><span class="ev ${v >= 0 ? "pos" : "neg"}">${fmtEval(v)}</span><span class="mv"><b>${esc(l.pv_san[0] || "")}</b> ${esc(l.pv_san.slice(1, 7).join(" "))}</span></div>`;
-    }).join("") + `<div class="mut" style="font-size:11px;margin-top:2px">depth ${r.lines[0].depth || "?"} · click a line to play it</div>`;
+      return `<div class="eline" data-i="${i}" title="Click to play this line · depth ${l.depth || "?"}"><span class="ev ${v >= 0 ? "pos" : "neg"}">${fmtEval(v)}</span><span class="mv"><b>${esc(l.pv_san[0] || "")}</b> ${esc(l.pv_san.slice(1, N === 1 ? 9 : 6).join(" "))}</span></div>`;
+    }).join("");
     box._lines = r.lines; box._P = P;
   }, cached ? 0 : 250);
 }
@@ -440,6 +468,8 @@ $("lines").onclick = (e) => {
 };
 $("linesOn").checked = LS.get("linesOn", true);
 $("linesOn").onchange = () => { LS.set("linesOn", $("linesOn").checked); if (R) refreshLines(); };
+$("linesN").value = LS.get("linesN", "1");
+$("linesN").onchange = () => { LS.set("linesN", $("linesN").value); if (R) refreshLines(); };
 
 $("first").onclick = () => go(0); $("prev").onclick = () => step(-1); $("next").onclick = () => step(1); $("last").onclick = () => go(1e9);
 $("flip").onchange = () => draw(false); $("arrow").onchange = () => draw(false);
@@ -538,7 +568,7 @@ $("me").value = LS.get("me", ""); $("me").onchange = () => { LS.set("me", me());
 $("impuser").value = LS.get("impuser", me()); $("site").value = LS.get("site", "chesscom");
 setTheme(LS.get("theme", 0));
 board.set({ fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" });
-showTab(["review","import","history","insights"].includes(LS.get("tab", "review")) ? LS.get("tab", "review") : "review");
+showTab(["review","import","history","insights","settings"].includes(LS.get("tab", "review")) ? LS.get("tab", "review") : "review");
 
 // ---------------------------------------------------------------- display
 $("pset").innerHTML = SETS.map((s) => `<option value="${s[0]}">${s[1]}</option>`).join("");
@@ -640,3 +670,15 @@ $("expHtml").onclick = async () => {
 api("/api/status").then((s) => { $("tbstat").textContent = s.tb ? `Tablebases: ${s.tb}-piece` : "Tablebases: not installed"; }).catch(() => {});
 $("profile").value = LS.get("profile", "balanced");
 $("profile").onchange = applyProfile; applyProfile();
+
+// layout helpers: right panel matches the board column height (desktop); new-game toggle
+const leftCol = document.querySelector("#review .left");
+function syncHeight() {
+  const rp = $("rp"), wide = matchMedia("(min-width: 861px)").matches;
+  rp.style.height = wide && leftCol.offsetHeight ? leftCol.offsetHeight + "px" : "auto";
+  if (R) graph();
+}
+new ResizeObserver(syncHeight).observe(leftCol);
+addEventListener("resize", syncHeight);
+$("newgame").onclick = () => { $("composer").style.display = ""; $("gamebar").style.display = "none"; $("pgn").focus(); };
+rtab(["moves", "report", "clock"].includes(LS.get("rtab", "moves")) && LS.get("rtab", "moves") !== "clock" ? LS.get("rtab", "moves") : "moves");

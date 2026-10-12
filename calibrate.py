@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Build calibration.json: fits "skill accuracy" -> player rating from public Lichess / Chess.com games.
+"""Build calibration.json: fits game features -> player rating, from public Lichess / Chess.com games
+in the 600-1200 range (fit on 500-1300 to avoid edge effects).
 
   python calibrate.py collect   # download a stratified sample of public rated games (resumable)
   python calibrate.py analyze   # run them through the same Stockfish pipeline (resumable)
@@ -16,7 +17,8 @@ import analyze as A
 
 DATA = A.HERE / "data" / "calib"
 DEPTH = 12
-BANDS = [0, 900, 1200, 1500, 1800, 2100, 2400, 9999]
+RANGE = (500, 1300)            # fit range; the model is declared valid for 600-1200
+BANDS = [500, 700, 900, 1100, 1300]
 UA = {"User-Agent": "chess-review-calibration (personal project, low volume)"}
 
 
@@ -43,7 +45,7 @@ def band(r):
     for i in range(len(BANDS) - 1):
         if BANDS[i] <= r < BANDS[i + 1]:
             return i
-    return 0
+    return None
 
 
 def good_game(pgn):
@@ -59,7 +61,7 @@ def good_game(pgn):
     if h.get("Variant", "Standard") != "Standard" or "FEN" in h:
         return None
     n = len(list(g.mainline_moves()))
-    if n < 30 or n > 160:
+    if n < 30 or n > 160 or not (RANGE[0] <= w < RANGE[1] and RANGE[0] <= b < RANGE[1]):
         return None
     return w, b
 
@@ -69,7 +71,7 @@ def lichess_seeds(per_band):
     seeds = {}
     idx = get("https://lichess.org/api/tournament", "application/json")
     ts = json.loads(idx).get("finished", []) if idx else []
-    ts = [t for t in ts if t.get("nbPlayers", 0) >= 150 and t.get("variant", {}).get("key") == "standard"][:6]
+    ts = [t for t in ts if t.get("nbPlayers", 0) >= 150 and t.get("variant", {}).get("key") == "standard"][:14]
     for t in ts:
         res = get(f"https://lichess.org/api/tournament/{t['id']}/results?nb=400", "application/x-ndjson")
         time.sleep(1.5)
@@ -78,17 +80,19 @@ def lichess_seeds(per_band):
                 o = json.loads(line)
             except ValueError:
                 continue
-            if o.get("rating") and o.get("username"):
-                seeds.setdefault(band(o["rating"]), set()).add(o["username"])
-    top = get("https://lichess.org/api/player/top/20/blitz", "application/json")
-    for u in (json.loads(top).get("users", []) if top else []):
-        seeds.setdefault(band(u["perfs"]["blitz"]["rating"]), set()).add(u["username"])
+            b = band(o["rating"]) if o.get("rating") else None
+            if b is not None and o.get("username"):
+                seeds.setdefault(b, set()).add(o["username"])
     return {b: random.sample(sorted(s), min(per_band, len(s))) for b, s in seeds.items()}
+
+
+lichess_seeds_cache = {}
 
 
 def collect_lichess(per_band, per_user):
     out, seen = [], set()
-    for b, users in sorted(lichess_seeds(per_band).items()):
+    lichess_seeds_cache.update(lichess_seeds(per_band))
+    for b, users in sorted(lichess_seeds_cache.items()):
         print(f"lichess band {BANDS[b]}+: {len(users)} seed users")
         for u in users:
             txt = get(f"https://lichess.org/api/games/user/{u}?max={per_user}&rated=true&perfType=bullet,blitz,rapid&pgnInJson=true&clocks=true",
@@ -103,24 +107,54 @@ def collect_lichess(per_band, per_user):
                     continue
                 seen.add(o["id"])
                 out.append({"site": "lichess", "id": o["id"], "pgn": o["pgn"]})
+    # snowball: opponents of low-rated seeds are low-rated too, so keep crawling from under-filled bands
+    used = {u for us in lichess_seeds_cache.values() for u in us}
+    for rnd in range(4):
+        have = {}
+        cand = {}
+        for g in out:
+            gm = chess.pgn.read_game(io.StringIO(g["pgn"]))
+            h = gm.headers
+            try:
+                w, b = int(h["WhiteElo"]), int(h["BlackElo"])
+            except (KeyError, ValueError):
+                continue
+            bb = band((w + b) // 2)
+            if bb is not None:
+                have[bb] = have.get(bb, 0) + 1
+            for name, r in ((h.get("White"), w), (h.get("Black"), b)):
+                k = band(r)
+                if name and k is not None and name not in used:
+                    cand.setdefault(k, set()).add(name)
+        needy = [k for k in range(len(BANDS) - 1) if have.get(k, 0) < per_band * 2]
+        print(f"  snowball round {rnd + 1}: games per band {dict(sorted(have.items()))}")
+        todo = [u for k in needy for u in random.sample(sorted(cand.get(k, [])), min(15, len(cand.get(k, []))))]
+        if not todo:
+            break
+        for u in todo:
+            used.add(u)
+            txt = get(f"https://lichess.org/api/games/user/{u}?max={per_user}&rated=true&perfType=bullet,blitz,rapid&pgnInJson=true&clocks=true",
+                      "application/x-ndjson")
+            time.sleep(1.6)
+            for line in (txt or "").splitlines():
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                if o["id"] not in seen and o.get("pgn"):
+                    seen.add(o["id"])
+                    out.append({"site": "lichess", "id": o["id"], "pgn": o["pgn"]})
     return out
 
 
 def collect_chesscom(n_users, per_user):
     users = []
-    lb = get("https://api.chess.com/pub/leaderboards", "application/json")
-    if lb:
-        d = json.loads(lb)
-        for k in ("live_blitz", "live_rapid", "live_bullet"):
-            users += [p["username"] for p in d.get(k, [])[:6]]
-    for title in ("FM", "NM", "CM", "IM"):
-        t = get(f"https://api.chess.com/pub/titled/{title}", "application/json")
+    countries = ("MT", "IS", "LU", "CY", "EE", "LV", "SK", "SI")
+    for cc in countries:
+        t = get(f"https://api.chess.com/pub/country/{cc}/players", "application/json")
         if t:
-            users += random.sample(json.loads(t)["players"], 6)
-    for c in ("MT", "IS", "LU", "CY"):
-        t = get(f"https://api.chess.com/pub/country/{c}/players", "application/json")
-        if t:
-            users += random.sample(json.loads(t)["players"], n_users // 4)
+            pl = json.loads(t)["players"]
+            users += random.sample(pl, min(len(pl), n_users // len(countries)))
     out, seen = [], set()
     for u in dict.fromkeys(users):
         arch = get(f"https://api.chess.com/pub/player/{u}/games/archives", "application/json")
@@ -150,7 +184,7 @@ def stratify(games, per_band):
         if not r:
             continue
         b = band((r[0] + r[1]) // 2)
-        if len(bands.setdefault(b, [])) < per_band:
+        if b is not None and len(bands.setdefault(b, [])) < per_band:
             bands[b].append(g)
     for b in sorted(bands):
         print(f"  band {BANDS[b]}+: {len(bands[b])} games")
@@ -162,8 +196,10 @@ def cmd_collect(a):
     DATA.mkdir(parents=True, exist_ok=True)
     random.seed(7)
     for site, fn in (("lichess", lambda: collect_lichess(a.seed_users, a.per_user)),
-                     ("chesscom", lambda: collect_chesscom(a.seed_users * 3, a.per_user))):
+                     ("chesscom", lambda: collect_chesscom(a.seed_users * 8, a.per_user))):
         f = DATA / f"games_{site}.json"
+        if a.only and a.only != site:
+            continue
         if f.exists() and not a.force:
             print(f"{site}: already collected ({f.name}); use --force to redo")
             continue
@@ -252,21 +288,28 @@ def cmd_fit(a):
         fit[key] = ols([A.feature_vector(s) for s in ss], [s["rating"] for s in ss])
         f = fit[key]
         print(f"  {key:16} n={f['n']:4}  w={f['w']}  sd={f['sd']:.0f}  R2={f['r2']}")
+    # reference distributions of skill accuracy per rating band and time control (for percentiles)
+    ref_acc = {}
+    for cls in ("all", "bullet", "blitz", "rapid"):
+        ref_acc[cls] = [sorted(round(s["acc"], 1) for s in samples
+                               if BANDS[i] <= s["rating"] < BANDS[i + 1] and (cls == "all" or ("rapid" if s["cls"] == "classical" else s["cls"]) == cls))
+                        for i in range(len(BANDS) - 1)]
     ref = round(sum(s["n"] for s in samples) / len(samples))
     (A.HERE / "calibration.json").write_text(json.dumps(
-        {"version": 1, "depth": DEPTH, "ref_moves": ref, "samples": len(samples), "fit": fit}, indent=1))
+        {"version": 2, "depth": DEPTH, "valid_range": [600, 1200], "fit_range": list(RANGE), "bands": BANDS, "ref_acc": ref_acc, "ref_moves": ref, "samples": len(samples), "fit": fit}, indent=1))
     print("wrote calibration.json")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("step", choices=["collect", "analyze", "fit", "all"])
-    ap.add_argument("--seed-users", type=int, default=10, help="seed users per rating band (lichess)")
-    ap.add_argument("--per-user", type=int, default=4, help="games taken per seed user")
-    ap.add_argument("--per-band", type=int, default=24, help="max games kept per rating band and site")
+    ap.add_argument("--seed-users", type=int, default=20, help="seed users per rating band (lichess)")
+    ap.add_argument("--per-user", type=int, default=5, help="games taken per seed user")
+    ap.add_argument("--per-band", type=int, default=45, help="max games kept per rating band and site")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--min-samples", type=int, default=40)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--only", choices=["lichess", "chesscom"], help="collect just one site")
     a = ap.parse_args()
     steps = ["collect", "analyze", "fit"] if a.step == "all" else [a.step]
     for s in steps:

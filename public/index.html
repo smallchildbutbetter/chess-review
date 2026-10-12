@@ -7,43 +7,41 @@
  <div class="brand"><span class="mark">♞</span>Chess Review <small>local · Stockfish</small></div>
  <nav id="nav">
   <button data-tab="review" class="on">Review</button><button data-tab="import">Import</button>
-  <button data-tab="history">History</button><button data-tab="insights">Insights</button>
+  <button data-tab="history">History</button><button data-tab="insights">Insights</button><button data-tab="settings">Settings</button>
  </nav>
- <span class="spacer"></span>
- <label class="who">Me <input id="me" placeholder="your username"></label>
 </header>
-<div class="toolbar">
- <label>Pieces <select id="pset"></select></label>
- <label>Board size <input type="range" id="bsize" min="320" max="760" step="10"></label>
- <span id="tbstat"></span>
-</div>
 
 <section class="tab on" id="tab-review">
- <textarea id="pgn" placeholder="Paste PGN here, or use the Import tab…"></textarea>
- <div class="row" style="margin-top:12px"><button id="go">Analyze</button>
-  <label>Engine <select id="profile"><option value="light">Light · depth 10</option><option value="balanced" selected>Balanced · depth 14</option><option value="deep">Deep · depth 18</option></select></label>
-  <span id="err" class="err"></span><span id="opening" class="mut"></span></div>
- <div id="bar"><div></div></div>
+ <div id="composer" class="panel">
+  <textarea id="pgn" placeholder="Paste PGN here, or use the Import tab…"></textarea>
+  <div class="row" style="margin:10px 0 0"><button id="go">Analyze</button><span id="err" class="err"></span><span class="mut" style="font-size:12px">Engine strength is in Settings</span></div>
+  <div id="bar"><div></div></div>
+ </div>
+ <div id="gamebar" class="gamebar" style="display:none">
+  <span id="gtitle" class="gt"></span><span id="opening" class="mut"></span><span class="spacer"></span>
+  <button class="sec sm" id="newgame">New game</button><button class="sec sm" id="expPgn">Export PGN</button><button class="sec sm" id="expHtml">Share HTML</button>
+  <a class="mut" id="dlpgn" style="font-size:12px;cursor:pointer">JSON</a>
+ </div>
  <div class="cols" id="review" style="display:none">
-  <div>
+  <div class="left">
    <div class="pl"><span id="ptop"></span><small id="rtop"></small></div>
    <div class="bwrap"><div class="evalbar" id="evalbar"><div class="evalfill" id="evalfill"></div><div class="evaltxt" id="evaltxt"></div></div><div class="bw" id="board"></div></div>
    <div class="pl"><span id="pbot"></span><small id="rbot"></small></div>
    <div class="ctrl">
     <button class="sec" id="first">⏮</button><button class="sec" id="prev">◀</button><button class="sec" id="next">▶</button><button class="sec" id="last">⏭</button>
-    <label><input type="checkbox" id="flip"> flip</label><label><input type="checkbox" id="arrow" checked> arrow</label>
-    <label><input type="checkbox" id="snd" checked> sound</label><span class="picks" id="themes"></span>
+    <label><input type="checkbox" id="flip">flip</label>
    </div>
-   <div class="hints"><kbd>←</kbd><kbd>→</kbd> step · <kbd>↑</kbd><kbd>↓</kbd> start/end · <kbd>F</kbd> flip · <kbd>A</kbd> arrow · <kbd>M</kbd> mute · <kbd>Esc</kbd> exit variation · drag any piece to try a move</div>
   </div>
-  <div>
-   <div class="panel info" id="info"></div>
-   <div class="panel" id="linespanel"><div class="row" style="margin:0 0 6px"><h2 style="margin:0">Engine lines</h2><label class="mut" style="font-size:12px;margin-left:auto"><input type="checkbox" id="linesOn" checked>on</label><span id="tbnote" class="tag" style="display:none;--c:#a78bfa"></span></div><div id="lines" class="mut">…</div></div>
-   <div class="panel"><svg id="graph" viewBox="0 0 400 80" width="100%" style="cursor:pointer"></svg></div>
-   <div class="panel" id="timepanel" style="display:none"><h2>Clock &amp; time</h2><svg id="tgraph" viewBox="0 0 400 120" width="100%" style="cursor:pointer"></svg><div id="tsum"></div></div>
-   <div class="panel" id="sum"></div>
-   <div class="panel" id="moves"></div>
-   <div class="row"><button class="sec sm" id="expPgn">Export annotated PGN</button><button class="sec sm" id="expHtml">Share as HTML file</button><a class="mut" id="dlpgn" style="font-size:13px;cursor:pointer">download report JSON</a></div>
+  <div class="rp panel" id="rp">
+   <div class="evalstrip"><svg id="graph" height="52" width="100%" style="cursor:pointer"></svg></div>
+   <div class="info" id="info"></div>
+   <div id="linespanel" class="elrow"><div id="lines" class="mut">…</div><span id="tbnote" class="tag" style="display:none;--c:#a78bfa"></span></div>
+   <div class="rp-tabs" id="rtabs"><button data-r="moves" class="on">Moves</button><button data-r="report">Report</button><button data-r="clock" id="tabClock" style="display:none">Clock</button></div>
+   <div class="rp-body">
+    <div class="pane on" id="pane-moves"><div id="moves"></div></div>
+    <div class="pane" id="pane-report"><div id="sum"></div></div>
+    <div class="pane" id="pane-clock"><div id="timepanel"><svg id="tgraph" viewBox="0 0 400 120" width="100%" style="cursor:pointer"></svg><div id="tsum"></div></div></div>
+   </div>
   </div>
  </div>
 </section>
@@ -63,6 +61,31 @@
  <div class="panel"><div class="row"><span>Stats for <b id="insuser"></b></span><button id="insgo" class="sm">Refresh</button>
   <span class="mut" style="font-size:13px">based on every game saved in History where one side matches your username</span></div></div>
  <div id="insbody"></div>
+</section>
+
+<section class="tab" id="tab-settings">
+ <div class="settings-grid">
+  <div class="panel"><h2>Appearance</h2>
+   <div class="srow"><label>Pieces</label><select id="pset"></select></div>
+   <div class="srow"><label>Board colors</label><span class="picks" id="themes"></span></div>
+   <div class="srow"><label>Board size</label><input type="range" id="bsize" min="320" max="760" step="10"></div>
+   <div class="srow"><label>Sound</label><input type="checkbox" id="snd" checked></div>
+   <div class="srow"><label>Best-move arrow</label><input type="checkbox" id="arrow" checked></div>
+  </div>
+  <div class="panel"><h2>Engine</h2>
+   <div class="srow"><label>Analysis strength</label><select id="profile"><option value="light">Light · depth 10</option><option value="balanced" selected>Balanced · depth 14</option><option value="deep">Deep · depth 18</option></select></div>
+   <div class="srow"><label>Live engine line</label><input type="checkbox" id="linesOn" checked></div>
+   <div class="srow"><label>Lines shown</label><select id="linesN"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option></select></div>
+   <div class="srow"><label>Tablebases</label><span id="tbstat" class="mut"></span></div>
+  </div>
+  <div class="panel"><h2>You</h2>
+   <div class="srow"><label>My username</label><input id="me" placeholder="your username"></div>
+   <div class="mut" style="font-size:12px;margin-top:6px">Orients the board to your side and powers Insights.</div>
+  </div>
+  <div class="panel"><h2>Keyboard shortcuts</h2>
+   <div class="hints"><kbd>←</kbd><kbd>→</kbd> step moves<br><kbd>↑</kbd><kbd>↓</kbd> jump to start / end<br><kbd>F</kbd> flip board<br><kbd>A</kbd> toggle arrow<br><kbd>M</kbd> mute<br><kbd>Esc</kbd> leave a variation<br>Drag any piece to try a move</div>
+  </div>
+ </div>
 </section>
 
 </main>

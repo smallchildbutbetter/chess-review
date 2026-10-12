@@ -394,6 +394,21 @@ def load_calibration():
     return _CALIB
 
 
+def percentile_vs_peers(acc, known, cls, calib):
+    """Share of calibration games (same rating band, same time control) with lower accuracy."""
+    bands, ref = calib.get("bands"), calib.get("ref_acc")
+    if not bands or not ref or known is None or not (bands[0] <= known < bands[-1]):
+        return None
+    i = max(k for k in range(len(bands) - 1) if bands[k] <= known)
+    pool = ref.get(cls, [[]] * (len(bands) - 1))[i]
+    if len(pool) < 25:
+        pool = ref["all"][i]
+    if len(pool) < 25:
+        return None
+    below = sum(1 for v in pool if v < acc) + 0.5 * sum(1 for v in pool if v == acc)
+    return {"pct": int(round(100 * below / len(pool))), "n": len(pool), "band": [bands[i], bands[i + 1]]}
+
+
 def rate_player(rows, color, headers):
     """Estimated performance rating with an uncertainty, calibrated on public games.
     Returns None when there are too few informative moves."""
@@ -421,9 +436,14 @@ def rate_player(rows, color, headers):
         w_p, w_g = 1 / prior_sd ** 2, 1 / sd ** 2
         est = (known * w_p + raw * w_g) / (w_p + w_g)
         post_sd = math.sqrt(1 / (w_p + w_g))
-    return {"rating": int(round(est / 10) * 10), "sd": int(round(post_sd / 10) * 10),
+    peers = percentile_vs_peers(acc, known, cls, calib)
+    if fit and fit.get("r2", 1) < 0.15:   # features barely predict rating here: don't print a made-up number
+        return {"rating": None, "note": "too noisy at this level", "reliable": False, "peers": peers, "n": n,
+                "accuracy": acc, "known": known, "class": cls, "site": site}
+    return {"rating": int(round(est / 10) * 10), "sd": int(round(post_sd / 10) * 10), "reliable": True, "peers": peers,
             "evidence": int(round(raw / 10) * 10), "known": known, "n": n, "accuracy": acc,
-            "calibrated": bool(fit), "class": cls, "site": site}
+            "calibrated": bool(fit), "class": cls, "site": site,
+            "outside_range": bool(fit and calib.get("valid_range") and not (calib["valid_range"][0] - 100 <= raw <= calib["valid_range"][1] + 100))}
 
 
 def est_rating(acpl):
